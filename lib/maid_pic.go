@@ -1,4 +1,4 @@
-package main
+package lib
 
 import (
 	"bytes"
@@ -35,14 +35,15 @@ import (
 )
 
 const (
-	defaultSupabaseURL       = "https://uzlzkjuijruqanetagxh.supabase.co"
-	defaultSupabaseKey       = "sb_publishable_6_fvEEW8e1DNGvtVhXPzxw_h2i04w7b"
-	defaultOutputDir         = "./data/images"
-	defaultDBPath            = "./data/maid_pic.db"
-	defaultFCMCredentialFile = "./data/fcm_token.json"
-	defaultListenAddr        = ":6988"
-	defaultQuality           = 85
-	defaultSpeed             = 8
+	DefaultSupabaseURL       = "https://uzlzkjuijruqanetagxh.supabase.co"
+	DefaultSupabaseKey       = "sb_publishable_6_fvEEW8e1DNGvtVhXPzxw_h2i04w7b"
+	DefaultOutputDir         = "./data/images"
+	DefaultDBPath            = "./data/maid_pic.db"
+	DefaultFCMCredentialFile = "./data/fcm_token.json"
+	supabaseUserAgent        = "sukiApp_backend/nightly (contact:admin@wenwen12305.top)"
+	DefaultListenAddr        = ":6988"
+	DefaultQuality           = 85
+	DefaultSpeed             = 8
 	outputWidth              = 800
 	outputHeight             = 450
 	imageDownloadTimeout     = 180 * time.Second
@@ -104,7 +105,7 @@ type MaidRecord struct {
 	UpdatedAt  time.Time
 }
 
-func newApp(cfg Config) (*App, error) {
+func NewApp(cfg Config) (*App, error) {
 	db, err := sql.Open("sqlite", cfg.DBPath)
 	if err != nil {
 		return nil, err
@@ -117,6 +118,9 @@ func newApp(cfg Config) (*App, error) {
 
 	supa, err := supabase.NewClient(cfg.SupabaseURL, cfg.SupabaseKey, &supabase.ClientOptions{
 		Schema: "public",
+		Headers: map[string]string{
+			"User-Agent": supabaseUserAgent,
+		},
 	})
 	if err != nil {
 		_ = db.Close()

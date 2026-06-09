@@ -1,4 +1,4 @@
-package main
+package lib
 
 import (
 	"crypto/rand"
@@ -111,6 +111,9 @@ func (a *App) refreshSupabaseSession(refreshToken string) (supabaseRefreshSessio
 func (a *App) newSupabaseAuthClient(refreshToken string) (*supabase.Client, supabaseRefreshSession, error) {
 	client, err := supabase.NewClient(a.cfg.SupabaseURL, a.cfg.SupabaseKey, &supabase.ClientOptions{
 		Schema: "public",
+		Headers: map[string]string{
+			"User-Agent": supabaseUserAgent,
+		},
 	})
 	if err != nil {
 		return nil, supabaseRefreshSession{}, err

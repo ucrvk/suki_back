@@ -1,19 +1,15 @@
-package main
+package lib
 
 import (
-	"context"
 	"log"
 	"regexp"
 	"strings"
 	"time"
-
-	"firebase.google.com/go/v4/messaging"
 )
 
 const (
 	defaultPollInterval       = 10 * time.Second
 	appStateBookingEnabledKey = "booking_enabled"
-	fcmTopicBookingOpen       = "booking_open"
 )
 
 var timeSlotPattern = regexp.MustCompile(`^21.*-22.*$`)
@@ -82,26 +78,4 @@ func hasReasonableTimeSlot(timeSlots []string) bool {
 		}
 	}
 	return false
-}
-
-func (a *App) sendBookingOpenNotification() error {
-	_, err := a.fcmClient.Send(context.Background(), &messaging.Message{
-		Topic: fcmTopicBookingOpen,
-		Notification: &messaging.Notification{
-			Title: "预约开放了",
-			Body:  "赶快来预约吧！再不预约都没得预约了！",
-		},
-		Data: map[string]string{
-			"type": "booking_open",
-			"time": time.Now().UTC().Format(time.RFC3339),
-		},
-		Android: &messaging.AndroidConfig{
-			Priority: "high",
-			Notification: &messaging.AndroidNotification{
-				ChannelID: "default",
-				Sound:     "default",
-			},
-		},
-	})
-	return err
 }

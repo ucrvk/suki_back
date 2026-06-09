@@ -1,4 +1,4 @@
-package main
+package lib
 
 import (
 	"fmt"
@@ -126,18 +126,4 @@ func (a *App) refreshSysbookingSession(session sysbookingSessionRecord) error {
 		return err
 	}
 	return nil
-}
-
-func (a *App) notifySysbookingSessionRefreshInvalid(session sysbookingSessionRecord, reason string) error {
-	if !session.FCMToken.Valid || strings.TrimSpace(session.FCMToken.String) == "" {
-		return nil
-	}
-	body := "请重新登录补充 token"
-	if trimmed := strings.TrimSpace(reason); trimmed != "" {
-		body = fmt.Sprintf("%s（%s）", body, trimmed)
-	}
-	return a.sendSysbookingDirectMessage(session, "登录 token 失效", body, map[string]string{
-		"type":   "session_refresh_invalid",
-		"reason": strings.TrimSpace(reason),
-	})
 }

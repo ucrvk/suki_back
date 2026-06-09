@@ -1,4 +1,4 @@
-package main
+package lib
 
 import (
 	"log"
@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"firebase.google.com/go/v4/messaging"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
@@ -71,15 +70,22 @@ func (a *App) handleSubscriptionMutation(c *gin.Context, add bool) {
 		return
 	}
 
-	var (
-		resp *messaging.TopicManagementResponse
-		err  error
-	)
 	if add {
-		resp, err = a.fcmClient.SubscribeToTopic(c.Request.Context(), []string{token}, fcmTopicBookingOpen)
-	} else {
-		resp, err = a.fcmClient.UnsubscribeFromTopic(c.Request.Context(), []string{token}, fcmTopicBookingOpen)
+		resp, err := a.subscribeFCMTopic(c.Request.Context(), token, fcmTopicBookingOpen)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"topic":         fcmTopicBookingOpen,
+			"success_count": resp.SuccessCount,
+			"failure_count": resp.FailureCount,
+			"errors":        resp.Errors,
+		})
+		return
 	}
+
+	resp, err := a.unsubscribeFCMTopic(c.Request.Context(), token, fcmTopicBookingOpen)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return

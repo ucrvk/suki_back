@@ -1,4 +1,4 @@
-package main
+package lib
 
 import (
 	"os"
@@ -20,7 +20,7 @@ const (
 	envFCMProxy    = "FCM_PROXY"
 )
 
-func applyEnvOverrides(cfg *Config) {
+func ApplyEnvOverrides(cfg *Config) {
 	cfg.SupabaseURL = firstNonEmpty(
 		readEnv(envSupabaseURL),
 		readEnv("SUPABASE_URL"),

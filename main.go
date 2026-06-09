@@ -5,22 +5,24 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+
+	"suki_back/lib"
 )
 
 func main() {
-	var cfg Config
-	cfg.FCMCredentialFile = defaultFCMCredentialFile
-	flag.StringVar(&cfg.SupabaseURL, "url", defaultSupabaseURL, "Supabase REST base URL")
-	flag.StringVar(&cfg.SupabaseKey, "apikey", defaultSupabaseKey, "Supabase anon/public API key")
-	flag.StringVar(&cfg.OutputDir, "out", defaultOutputDir, "output directory for AVIF files")
-	flag.StringVar(&cfg.DBPath, "db", defaultDBPath, "sqlite database path")
-	flag.StringVar(&cfg.ListenAddr, "listen", defaultListenAddr, "gin server listen address")
+	var cfg lib.Config
+	cfg.FCMCredentialFile = lib.DefaultFCMCredentialFile
+	flag.StringVar(&cfg.SupabaseURL, "url", lib.DefaultSupabaseURL, "Supabase REST base URL")
+	flag.StringVar(&cfg.SupabaseKey, "apikey", lib.DefaultSupabaseKey, "Supabase anon/public API key")
+	flag.StringVar(&cfg.OutputDir, "out", lib.DefaultOutputDir, "output directory for AVIF files")
+	flag.StringVar(&cfg.DBPath, "db", lib.DefaultDBPath, "sqlite database path")
+	flag.StringVar(&cfg.ListenAddr, "listen", lib.DefaultListenAddr, "gin server listen address")
 	flag.BoolVar(&cfg.UpdateNow, "u", false, "run one maid image sync on startup")
-	flag.IntVar(&cfg.Quality, "quality", defaultQuality, "AVIF quality 0-100")
-	flag.IntVar(&cfg.Speed, "speed", defaultSpeed, "AVIF speed 0-10")
+	flag.IntVar(&cfg.Quality, "quality", lib.DefaultQuality, "AVIF quality 0-100")
+	flag.IntVar(&cfg.Speed, "speed", lib.DefaultSpeed, "AVIF speed 0-10")
 	flag.Parse()
 
-	applyEnvOverrides(&cfg)
+	lib.ApplyEnvOverrides(&cfg)
 
 	if cfg.SupabaseKey == "" {
 		log.Fatal("missing apikey")
@@ -36,7 +38,7 @@ func main() {
 		log.Fatalf("create db dir: %v", err)
 	}
 
-	app, err := newApp(cfg)
+	app, err := lib.NewApp(cfg)
 	if err != nil {
 		log.Fatalf("init app: %v", err)
 	}

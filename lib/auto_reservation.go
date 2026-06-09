@@ -1,14 +1,11 @@
-package main
+package lib
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 	"time"
-
-	"firebase.google.com/go/v4/messaging"
 )
 
 func (a *App) runAutoReservations() error {
@@ -130,46 +127,12 @@ func (a *App) attemptAutoReservation(maid Maid, timeSlotLabel string, booking sy
 	return nil
 }
 
-func (a *App) notifyBookingSuccess(sessionRecord sysbookingSessionRecord, maid Maid, timeSlotLabel string) error {
-	return a.sendSysbookingDirectMessage(sessionRecord, "预约成功", fmt.Sprintf("%s %s 已成功预约", strings.TrimSpace(maid.Name), timeSlotLabel), map[string]string{
-		"type":       "booking_success",
-		"maid_id":    strings.TrimSpace(maid.ID),
-		"maid_vrcid": strings.TrimSpace(maid.VRCID),
-		"time_slot":  timeSlotLabel,
-	})
-}
-
-func (a *App) notifyBookingTokenInvalid(sessionRecord sysbookingSessionRecord, maid Maid, timeSlotLabel string) error {
-	return a.sendSysbookingDirectMessage(sessionRecord, "预约 token 失效", fmt.Sprintf("%s %s 的预约 token 失效，请重新登录补充 token", strings.TrimSpace(maid.Name), timeSlotLabel), map[string]string{
-		"type":       "booking_token_invalid",
-		"maid_id":    strings.TrimSpace(maid.ID),
-		"maid_vrcid": strings.TrimSpace(maid.VRCID),
-		"time_slot":  timeSlotLabel,
-	})
-}
-
-func (a *App) sendSysbookingDirectMessage(sessionRecord sysbookingSessionRecord, title, body string, data map[string]string) error {
-	if !sessionRecord.FCMToken.Valid || strings.TrimSpace(sessionRecord.FCMToken.String) == "" {
-		return nil
-	}
-	message := &messaging.Message{
-		Token: sessionRecord.FCMToken.String,
-		Notification: &messaging.Notification{
-			Title: title,
-			Body:  body,
-		},
-		Data: data,
-	}
-	_, err := a.fcmClient.Send(context.Background(), message)
-	return err
-}
-
 func normalizeReservationTimeSlot(raw string) (int, string, bool) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
 		return 0, "", false
 	}
-	value = strings.NewReplacer("：", ":").Replace(value)
+	value = strings.NewReplacer("，", ":").Replace(value)
 	switch {
 	case strings.HasPrefix(value, "21"):
 		return 21, value, true
