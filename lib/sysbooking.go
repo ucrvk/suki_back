@@ -15,7 +15,7 @@ import (
 )
 
 type sysbookingLoginRequest struct {
-	ID             string  `json:"id"`
+	UserID         string  `json:"user_id"`
 	SBRefreshToken string  `json:"sb_refreshtoken"`
 	FCMToken       *string `json:"fcm_token,omitempty"`
 }
@@ -53,10 +53,10 @@ func (a *App) handleSysbookingLogin(c *gin.Context) {
 		return
 	}
 
-	userID := strings.TrimSpace(req.ID)
+	userID := strings.TrimSpace(req.UserID)
 	refreshToken := strings.TrimSpace(req.SBRefreshToken)
 	if userID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing user_id"})
 		return
 	}
 	if refreshToken == "" {

@@ -127,7 +127,7 @@
 
 ```json
 {
-  "id": "052554e2-b3c9-40d9-a947-9c1da6f2a63d",
+  "user_id": "052554e2-b3c9-40d9-a947-9c1da6f2a63d",
   "sb_refreshtoken": "xxx",
   "fcm_token": "optional_device_token"
 }
@@ -135,7 +135,7 @@
 
 #### 字段说明
 
-- `id`：用户 ID
+- `user_id`：用户 ID
 - `sb_refreshtoken`：刷新令牌
 - `fcm_token`：可选，设备的 FCM token
 
@@ -259,32 +259,85 @@
 
 ---
 
-### `GET /sysbooking/queue`
+### `GET /sysbooking/queuelist`
 
-查询当前登录用户在指定 `maid_id + timeslot` 队列中的排名。
+查询当前登录用户所有状态为 `waiting` 的预约列表。
 
 #### 请求头
 
 - `x-booking-token`：登录 token
 
-#### 查询参数
+#### 响应示例
 
-- `maidid`：maid ID
-- `timeslot`：只能是 `21` 或 `22`
+```json
+[
+  {
+    "maid_id": "maid_xxx",
+    "timeslot": 21,
+    "queue": 0,
+    "autoqueue": true
+  }
+]
+```
 
-#### 响应规则
+#### 字段说明
 
-- 如果用户在队列中，返回一个数字：
-  - `0` 表示前面没人
-  - `1` 表示前面有 1 个人
-  - 以此类推
-- 如果用户不在队列中，返回 `204 No Content`
+- `maid_id`：maid ID
+- `timeslot`：预约时段
+- `queue`：当前队列前面有多少人，`0` 表示前面没人
+- `autoqueue`：是否标记为自动排队
 
 #### 状态码
 
 - `200 OK`
-- `204 No Content`
+- `401 Unauthorized`
+- `403 Forbidden`
+- `500 Internal Server Error`
+
+---
+
+### `PUT /sysbooking/booking`
+
+仅修改指定 booking 的 `autoqueue`。
+
+#### 请求头
+
+- `x-booking-token`：登录 token
+
+#### 请求体
+
+```json
+{
+  "booking_id": "f4c3d2b1a09876543210fedcba987654",
+  "autoqueue": true
+}
+```
+
+#### 字段说明
+
+- `booking_id`：要修改的 booking ID
+- `autoqueue`：新的自动排队状态
+
+#### 说明
+
+- 只会修改 `autoqueue`
+- 不会修改 `maid_id`、`timeslot`、`with_friend`、`status` 等其他字段
+- 仅允许修改当前登录用户自己的、且状态为 `waiting` 的 booking
+
+#### 响应示例
+
+```json
+{
+  "booking_id": "f4c3d2b1a09876543210fedcba987654"
+}
+```
+
+#### 状态码
+
+- `200 OK`
 - `400 Bad Request`
 - `401 Unauthorized`
 - `403 Forbidden`
+- `404 Not Found`
+- `409 Conflict`
 - `500 Internal Server Error`
