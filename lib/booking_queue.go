@@ -274,16 +274,18 @@ func (a *App) requireSysbookingSession(c *gin.Context) (sysbookingSessionRecord,
 
 func (a *App) getSysbookingSessionByToken(token string) (sysbookingSessionRecord, error) {
 	row := a.db.QueryRow(
-		`SELECT user_id, sb_refreshtoken, sb_token, fcm_token, token_valid, token, updated_at
+		`SELECT user_id, sb_refreshtoken, sb_token, fcm_token, notification_enabled, token_valid, token, updated_at
 		 FROM sysbooking_sessions WHERE token = ?`,
 		strings.TrimSpace(token),
 	)
 	var record sysbookingSessionRecord
 	var updatedAt string
+	var notificationEnabled int
 	var tokenValid int
-	if err := row.Scan(&record.UserID, &record.SBRefreshToken, &record.SBToken, &record.FCMToken, &tokenValid, &record.Token, &updatedAt); err != nil {
+	if err := row.Scan(&record.UserID, &record.SBRefreshToken, &record.SBToken, &record.FCMToken, &notificationEnabled, &tokenValid, &record.Token, &updatedAt); err != nil {
 		return sysbookingSessionRecord{}, err
 	}
+	record.NotificationEnabled = notificationEnabled == 1
 	record.TokenValid = tokenValid == 1
 	if t, err := time.Parse(time.RFC3339Nano, updatedAt); err == nil {
 		record.UpdatedAt = t

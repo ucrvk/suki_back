@@ -115,7 +115,7 @@
 
 ### `POST /sysbooking/login`
 
-使用 `sb_refreshtoken` 刷新会话，校验返回的 `user.id` 与请求中的 `id` 是否一致。
+使用 `sb_refreshtoken` 刷新会话，校验返回的 `user.id` 与请求中的 `user_id` 是否一致。
 
 如果一致：
 
@@ -340,4 +340,46 @@
 - `403 Forbidden`
 - `404 Not Found`
 - `409 Conflict`
+- `500 Internal Server Error`
+
+---
+
+### `PUT /sysbooking/notification`
+
+更新当前登录用户的 FCM token 和通知开关。
+
+#### 请求头
+
+- `x-booking-token`：登录 token
+
+#### 请求体
+
+```json
+{
+  "fcm_token": "fcm_device_token",
+  "notification": true
+}
+```
+
+#### 字段说明
+
+- `fcm_token`：新的设备 FCM token
+- `notification`：是否开启通知
+- 默认值为 `false`
+
+#### 响应示例
+
+```json
+{
+  "user_id": "052554e2-b3c9-40d9-a947-9c1da6f2a63d",
+  "fcm_token": "fcm_device_token",
+  "notification_enabled": true
+}
+```
+
+#### 状态码
+
+- `200 OK`
+- `400 Bad Request`
+- `401 Unauthorized`
 - `500 Internal Server Error`

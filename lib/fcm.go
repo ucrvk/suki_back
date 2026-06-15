@@ -101,6 +101,12 @@ func (a *App) sendBookingOpenNotification() error {
 }
 
 func (a *App) sendSysbookingDirectMessage(sessionRecord sysbookingSessionRecord, title, body string, data map[string]string) error {
+	if !sessionRecord.NotificationEnabled {
+		return nil
+	}
+	if !sessionRecord.FCMToken.Valid {
+		return nil
+	}
 	return a.sendFCMTokenNotification(context.Background(), sessionRecord.FCMToken.String, title, body, data)
 }
 

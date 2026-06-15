@@ -403,6 +403,7 @@ func initSchema(db *sql.DB) error {
 			sb_refreshtoken TEXT NOT NULL,
 			sb_token TEXT NOT NULL,
 			fcm_token TEXT,
+			notification_enabled INTEGER NOT NULL DEFAULT 0 CHECK(notification_enabled IN (0, 1)),
 			token_valid INTEGER NOT NULL DEFAULT 1 CHECK(token_valid IN (0, 1)),
 			token TEXT NOT NULL,
 			updated_at TEXT NOT NULL

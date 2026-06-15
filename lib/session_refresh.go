@@ -57,7 +57,7 @@ func (a *App) runDailyRefreshTokenCheck() error {
 
 func (a *App) listSysbookingSessions() ([]sysbookingSessionRecord, error) {
 	rows, err := a.db.Query(
-		`SELECT user_id, sb_refreshtoken, sb_token, fcm_token, token_valid, token, updated_at
+		`SELECT user_id, sb_refreshtoken, sb_token, fcm_token, notification_enabled, token_valid, token, updated_at
 		 FROM sysbooking_sessions`,
 	)
 	if err != nil {
@@ -69,10 +69,12 @@ func (a *App) listSysbookingSessions() ([]sysbookingSessionRecord, error) {
 	for rows.Next() {
 		var record sysbookingSessionRecord
 		var updatedAt string
+		var notificationEnabled int
 		var tokenValid int
-		if err := rows.Scan(&record.UserID, &record.SBRefreshToken, &record.SBToken, &record.FCMToken, &tokenValid, &record.Token, &updatedAt); err != nil {
+		if err := rows.Scan(&record.UserID, &record.SBRefreshToken, &record.SBToken, &record.FCMToken, &notificationEnabled, &tokenValid, &record.Token, &updatedAt); err != nil {
 			return nil, err
 		}
+		record.NotificationEnabled = notificationEnabled == 1
 		record.TokenValid = tokenValid == 1
 		if t, err := time.Parse(time.RFC3339Nano, updatedAt); err == nil {
 			record.UpdatedAt = t

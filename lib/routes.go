@@ -37,6 +37,7 @@ func (a *App) runServer() error {
 	router.POST("/sysbooking/booking", a.handleSysbookingBookingCreate)
 	router.PUT("/sysbooking/booking", a.handleSysbookingBookingUpdate)
 	router.DELETE("/sysbooking/booking", a.handleSysbookingBookingDelete)
+	router.PUT("/sysbooking/notification", a.handleSysbookingNotificationUpdate)
 	router.GET("/sysbooking/queuelist", a.handleSysbookingQueueList)
 	router.GET("/manifest.json", a.serveManifest)
 	router.GET("/images/:file", a.serveImage)
