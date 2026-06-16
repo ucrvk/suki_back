@@ -64,6 +64,7 @@ type sysbookingBookingUpdateRequest struct {
 }
 
 type sysbookingQueueListItem struct {
+	BookingID string `json:"booking_id"`
 	MaidID    string `json:"maid_id"`
 	Timeslot  int    `json:"timeslot"`
 	Queue     int    `json:"queue"`
@@ -582,7 +583,7 @@ func (a *App) getSysbookingQueueRankForBooking(maidID string, timeslot int, crea
 func (a *App) listSysbookingQueueItems(userID string) ([]sysbookingQueueListItem, error) {
 	start := time.Now()
 	rows, err := a.db.Query(
-		`SELECT id, maid_id, timeslot, autoqueue, created_at
+		`SELECT id, booking_id, maid_id, timeslot, autoqueue, created_at
 		 FROM sysbooking_bookings
 		 WHERE user_id = ? AND status = ?
 		 ORDER BY maid_id ASC, timeslot ASC, created_at ASC, id ASC`,
@@ -597,6 +598,7 @@ func (a *App) listSysbookingQueueItems(userID string) ([]sysbookingQueueListItem
 
 	type queueRow struct {
 		internalID int64
+		bookingID  string
 		maidID     string
 		timeslot   int
 		autoqueue  int
@@ -606,7 +608,7 @@ func (a *App) listSysbookingQueueItems(userID string) ([]sysbookingQueueListItem
 	rawRows := make([]queueRow, 0)
 	for rows.Next() {
 		var item queueRow
-		if err := rows.Scan(&item.internalID, &item.maidID, &item.timeslot, &item.autoqueue, &item.createdAt); err != nil {
+		if err := rows.Scan(&item.internalID, &item.bookingID, &item.maidID, &item.timeslot, &item.autoqueue, &item.createdAt); err != nil {
 			log.Printf("[db] list sysbooking queue items user_id=%s scan err=%v", userID, err)
 			return nil, err
 		}
@@ -627,6 +629,7 @@ func (a *App) listSysbookingQueueItems(userID string) ([]sysbookingQueueListItem
 			continue
 		}
 		items = append(items, sysbookingQueueListItem{
+			BookingID: row.bookingID,
 			MaidID:    row.maidID,
 			Timeslot:  row.timeslot,
 			Queue:     rank,

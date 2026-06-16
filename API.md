@@ -272,6 +272,7 @@
 ```json
 [
   {
+    "booking_id": "f4c3d2b1a09876543210fedcba987654",
     "maid_id": "maid_xxx",
     "timeslot": 21,
     "queue": 0,
@@ -283,6 +284,7 @@
 #### 字段说明
 
 - `maid_id`：maid ID
+- `booking_id`：预约 ID
 - `timeslot`：预约时段
 - `queue`：当前队列前面有多少人，`0` 表示前面没人
 - `autoqueue`：是否标记为自动排队
