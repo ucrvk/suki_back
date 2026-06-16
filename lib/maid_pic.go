@@ -110,7 +110,24 @@ func NewApp(cfg Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(8)
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(`PRAGMA journal_mode = WAL`); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(`PRAGMA busy_timeout = 5000`); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(`PRAGMA synchronous = NORMAL`); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := initSchema(db); err != nil {
 		_ = db.Close()
 		return nil, err

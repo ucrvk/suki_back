@@ -14,12 +14,16 @@ var utcPlus8 = time.FixedZone("UTC+8", 8*60*60)
 func (a *App) startDailyRefreshTokenPoller() {
 	for {
 		wait := timeUntilNextDailyRefreshTokenCheck(time.Now())
+		log.Printf("[poll.refresh] next run in %s", wait)
 		timer := time.NewTimer(wait)
 		<-timer.C
 		timer.Stop()
 
+		log.Printf("[poll.refresh] tick start")
 		if err := a.runDailyRefreshTokenCheck(); err != nil {
 			log.Printf("daily refresh token check failed: %v", err)
+		} else {
+			log.Printf("[poll.refresh] tick ok")
 		}
 	}
 }
@@ -43,24 +47,31 @@ func timeUntilNextDailyRefreshTokenCheck(now time.Time) time.Duration {
 }
 
 func (a *App) runDailyRefreshTokenCheck() error {
+	start := time.Now()
 	sessions, err := a.listSysbookingSessions()
 	if err != nil {
+		log.Printf("[poll.refresh] list sessions failed err=%v", err)
 		return err
 	}
+	log.Printf("[poll.refresh] loaded sessions count=%d", len(sessions))
 	for _, session := range sessions {
+		log.Printf("[poll.refresh] refresh session user_id=%s token_valid=%t notification_enabled=%t", session.UserID, session.TokenValid, session.NotificationEnabled)
 		if err := a.refreshSysbookingSession(session); err != nil {
 			log.Printf("refresh session failed: user_id=%s err=%v", session.UserID, err)
 		}
 	}
+	log.Printf("[poll.refresh] tick done dur=%s", time.Since(start))
 	return nil
 }
 
 func (a *App) listSysbookingSessions() ([]sysbookingSessionRecord, error) {
+	start := time.Now()
 	rows, err := a.db.Query(
 		`SELECT user_id, sb_refreshtoken, sb_token, fcm_token, notification_enabled, token_valid, token, updated_at
 		 FROM sysbooking_sessions`,
 	)
 	if err != nil {
+		log.Printf("[db] list sysbooking_sessions err=%v", err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -82,14 +93,18 @@ func (a *App) listSysbookingSessions() ([]sysbookingSessionRecord, error) {
 		sessions = append(sessions, record)
 	}
 	if err := rows.Err(); err != nil {
+		log.Printf("[db] list sysbooking_sessions rows err=%v", err)
 		return nil, err
 	}
+	log.Printf("[db] list sysbooking_sessions count=%d dur=%s", len(sessions), time.Since(start))
 	return sessions, nil
 }
 
 func (a *App) refreshSysbookingSession(session sysbookingSessionRecord) error {
+	start := time.Now()
 	refreshToken := strings.TrimSpace(session.SBRefreshToken)
 	if refreshToken == "" {
+		log.Printf("[poll.refresh] missing refresh token user_id=%s", session.UserID)
 		if err := a.setSysbookingSessionTokenValid(session.UserID, false); err != nil {
 			return err
 		}
@@ -101,6 +116,7 @@ func (a *App) refreshSysbookingSession(session sysbookingSessionRecord) error {
 
 	_, refreshed, err := a.newSupabaseAuthClient(refreshToken)
 	if err != nil {
+		log.Printf("[poll.refresh] refresh failed user_id=%s err=%v", session.UserID, err)
 		if err := a.setSysbookingSessionTokenValid(session.UserID, false); err != nil {
 			return err
 		}
@@ -110,6 +126,7 @@ func (a *App) refreshSysbookingSession(session sysbookingSessionRecord) error {
 		return nil
 	}
 	if refreshed.User.ID != "" && refreshed.User.ID != session.UserID {
+		log.Printf("[poll.refresh] user mismatch user_id=%s refreshed=%s", session.UserID, refreshed.User.ID)
 		if err := a.setSysbookingSessionTokenValid(session.UserID, false); err != nil {
 			return err
 		}
@@ -125,7 +142,9 @@ func (a *App) refreshSysbookingSession(session sysbookingSessionRecord) error {
 	updated.TokenValid = true
 	updated.UpdatedAt = time.Now().UTC()
 	if err := a.upsertSysbookingSession(updated); err != nil {
+		log.Printf("[poll.refresh] store updated session failed user_id=%s err=%v", session.UserID, err)
 		return err
 	}
+	log.Printf("[poll.refresh] ok user_id=%s dur=%s", session.UserID, time.Since(start))
 	return nil
 }

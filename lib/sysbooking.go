@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -53,8 +54,10 @@ type sysbookingSessionRecord struct {
 }
 
 func (a *App) handleSysbookingLogin(c *gin.Context) {
+	log.Printf("[sysbooking.login] request from=%s", c.ClientIP())
 	var req sysbookingLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("[sysbooking.login] invalid json err=%v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
 		return
 	}
@@ -62,20 +65,25 @@ func (a *App) handleSysbookingLogin(c *gin.Context) {
 	userID := strings.TrimSpace(req.UserID)
 	refreshToken := strings.TrimSpace(req.SBRefreshToken)
 	if userID == "" {
+		log.Printf("[sysbooking.login] missing user_id")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing user_id"})
 		return
 	}
 	if refreshToken == "" {
+		log.Printf("[sysbooking.login] missing sb_refreshtoken user_id=%s", userID)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing sb_refreshtoken"})
 		return
 	}
 
+	log.Printf("[sysbooking.login] refreshing supabase user_id=%s", userID)
 	_, session, err := a.newSupabaseAuthClient(refreshToken)
 	if err != nil {
+		log.Printf("[sysbooking.login] refresh failed user_id=%s err=%v", userID, err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 	if strings.TrimSpace(session.User.ID) != userID {
+		log.Printf("[sysbooking.login] user mismatch request_user_id=%s session_user_id=%s", userID, strings.TrimSpace(session.User.ID))
 		c.JSON(http.StatusForbidden, gin.H{"error": "user id mismatch"})
 		return
 	}
@@ -96,9 +104,11 @@ func (a *App) handleSysbookingLogin(c *gin.Context) {
 		UpdatedAt:      time.Now().UTC(),
 	}
 	if err := a.upsertSysbookingSession(record); err != nil {
+		log.Printf("[sysbooking.login] store failed user_id=%s err=%v", userID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	log.Printf("[sysbooking.login] ok user_id=%s token=%s fcm=%t notification_enabled=%t", userID, shortLogValue(localToken, 12), record.FCMToken.Valid, record.NotificationEnabled)
 
 	c.JSON(http.StatusOK, gin.H{
 		"user_id": userID,
@@ -107,8 +117,10 @@ func (a *App) handleSysbookingLogin(c *gin.Context) {
 }
 
 func (a *App) handleSysbookingNotificationUpdate(c *gin.Context) {
+	log.Printf("[sysbooking.notification] request from=%s", c.ClientIP())
 	var req sysbookingNotificationUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("[sysbooking.notification] invalid json err=%v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
 		return
 	}
@@ -120,22 +132,28 @@ func (a *App) handleSysbookingNotificationUpdate(c *gin.Context) {
 
 	fcmToken := strings.TrimSpace(req.FCMToken)
 	if fcmToken == "" {
+		log.Printf("[sysbooking.notification] missing fcm_token user_id=%s", userID)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing fcm_token"})
 		return
 	}
 	if req.Notification == nil {
+		log.Printf("[sysbooking.notification] missing notification user_id=%s", userID)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing notification"})
 		return
 	}
 
+	log.Printf("[sysbooking.notification] update user_id=%s fcm=%s notification=%t", userID, shortLogValue(fcmToken, 12), *req.Notification)
 	if err := a.updateSysbookingSessionNotification(userID, fcmToken, *req.Notification); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			log.Printf("[sysbooking.notification] session not found user_id=%s", userID)
 			c.JSON(http.StatusNotFound, gin.H{"error": "sysbooking session not found"})
 			return
 		}
+		log.Printf("[sysbooking.notification] store failed user_id=%s err=%v", userID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	log.Printf("[sysbooking.notification] ok user_id=%s notification=%t", userID, *req.Notification)
 
 	c.JSON(http.StatusOK, gin.H{
 		"user_id":              userID,
@@ -200,6 +218,7 @@ func generateLocalToken64() (string, error) {
 }
 
 func (a *App) upsertSysbookingSession(record sysbookingSessionRecord) error {
+	start := time.Now()
 	_, err := a.db.Exec(
 		`INSERT INTO sysbooking_sessions (user_id, sb_refreshtoken, sb_token, fcm_token, token_valid, token, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -218,10 +237,16 @@ func (a *App) upsertSysbookingSession(record sysbookingSessionRecord) error {
 		record.Token,
 		record.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	)
-	return err
+	if err != nil {
+		log.Printf("[db] upsert sysbooking_sessions user_id=%s err=%v", record.UserID, err)
+		return err
+	}
+	log.Printf("[db] upsert sysbooking_sessions user_id=%s fcm=%t notification_enabled=%t token_valid=%t dur=%s", record.UserID, record.FCMToken.Valid, record.NotificationEnabled, record.TokenValid, time.Since(start))
+	return nil
 }
 
 func (a *App) updateSysbookingSessionNotification(userID, fcmToken string, enabled bool) error {
+	start := time.Now()
 	result, err := a.db.Exec(
 		`UPDATE sysbooking_sessions
 		 SET fcm_token = ?, notification_enabled = ?, updated_at = ?
@@ -232,19 +257,24 @@ func (a *App) updateSysbookingSessionNotification(userID, fcmToken string, enabl
 		strings.TrimSpace(userID),
 	)
 	if err != nil {
+		log.Printf("[db] update sysbooking_sessions notification user_id=%s err=%v", userID, err)
 		return err
 	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
+		log.Printf("[db] update sysbooking_sessions notification user_id=%s rows_affected err=%v", userID, err)
 		return err
 	}
 	if rowsAffected == 0 {
+		log.Printf("[db] update sysbooking_sessions notification user_id=%s not found", userID)
 		return sql.ErrNoRows
 	}
+	log.Printf("[db] update sysbooking_sessions notification user_id=%s fcm=%s enabled=%t dur=%s", userID, shortLogValue(fcmToken, 12), enabled, time.Since(start))
 	return nil
 }
 
 func (a *App) getSysbookingSession(userID string) (sysbookingSessionRecord, error) {
+	start := time.Now()
 	row := a.db.QueryRow(
 		`SELECT user_id, sb_refreshtoken, sb_token, fcm_token, notification_enabled, token_valid, token, updated_at
 		 FROM sysbooking_sessions WHERE user_id = ?`,
@@ -255,6 +285,7 @@ func (a *App) getSysbookingSession(userID string) (sysbookingSessionRecord, erro
 	var notificationEnabled int
 	var tokenValid int
 	if err := row.Scan(&record.UserID, &record.SBRefreshToken, &record.SBToken, &record.FCMToken, &notificationEnabled, &tokenValid, &record.Token, &updatedAt); err != nil {
+		log.Printf("[db] select sysbooking_sessions user_id=%s err=%v dur=%s", userID, err, time.Since(start))
 		return sysbookingSessionRecord{}, err
 	}
 	record.NotificationEnabled = notificationEnabled == 1
@@ -262,6 +293,7 @@ func (a *App) getSysbookingSession(userID string) (sysbookingSessionRecord, erro
 	if t, err := time.Parse(time.RFC3339Nano, updatedAt); err == nil {
 		record.UpdatedAt = t
 	}
+	log.Printf("[db] select sysbooking_sessions user_id=%s found token_valid=%t notification_enabled=%t fcm=%t dur=%s", userID, record.TokenValid, record.NotificationEnabled, record.FCMToken.Valid, time.Since(start))
 	return record, nil
 }
 
@@ -277,6 +309,7 @@ func (a *App) hasSysbookingSession(userID string) (bool, error) {
 }
 
 func (a *App) setSysbookingSessionTokenValid(userID string, valid bool) error {
+	start := time.Now()
 	_, err := a.db.Exec(
 		`UPDATE sysbooking_sessions
 		 SET token_valid = ?, updated_at = ?
@@ -285,6 +318,11 @@ func (a *App) setSysbookingSessionTokenValid(userID string, valid bool) error {
 		time.Now().UTC().Format(time.RFC3339Nano),
 		strings.TrimSpace(userID),
 	)
+	if err != nil {
+		log.Printf("[db] update sysbooking_sessions token_valid user_id=%s valid=%t err=%v", userID, valid, err)
+		return err
+	}
+	log.Printf("[db] update sysbooking_sessions token_valid user_id=%s valid=%t dur=%s", userID, valid, time.Since(start))
 	return err
 }
 

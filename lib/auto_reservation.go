@@ -9,11 +9,15 @@ import (
 )
 
 func (a *App) runAutoReservations() error {
+	start := time.Now()
+	log.Printf("[auto_reservation] start")
 	rows, err := a.fetchBookingRows()
 	if err != nil {
+		log.Printf("[auto_reservation] fetch booking rows failed err=%v", err)
 		return err
 	}
 	if len(rows) == 0 {
+		log.Printf("[auto_reservation] no booking rows")
 		return nil
 	}
 
@@ -29,6 +33,7 @@ func (a *App) runAutoReservations() error {
 		}
 	}
 	if len(slotLabels) == 0 {
+		log.Printf("[auto_reservation] no valid time slots")
 		return nil
 	}
 
@@ -41,23 +46,29 @@ func (a *App) runAutoReservations() error {
 			if !ok {
 				continue
 			}
+			log.Printf("[auto_reservation] process maid_id=%s vrcid=%s slot=%d label=%s", maid.ID, maid.VRCID, slot, label)
 			if err := a.processReservationQueueForMaidSlot(maid, slot, label); err != nil {
 				log.Printf("auto reservation queue failed: maid_id=%s vrcid=%s slot=%d err=%v", maid.ID, maid.VRCID, slot, err)
 			}
 		}
 	}
+	log.Printf("[auto_reservation] done dur=%s", time.Since(start))
 	return nil
 }
 
 func (a *App) processReservationQueueForMaidSlot(maid Maid, slot int, timeSlotLabel string) error {
 	for _, maidID := range uniqueStrings(strings.TrimSpace(maid.ID), strings.TrimSpace(maid.VRCID)) {
+		log.Printf("[auto_reservation] lookup head maid_id=%s slot=%d", maidID, slot)
 		booking, ok, err := a.getWaitingSysbookingBookingHead(maidID, slot)
 		if err != nil {
+			log.Printf("[auto_reservation] lookup head failed maid_id=%s slot=%d err=%v", maidID, slot, err)
 			return err
 		}
 		if !ok {
+			log.Printf("[auto_reservation] no waiting booking maid_id=%s slot=%d", maidID, slot)
 			continue
 		}
+		log.Printf("[auto_reservation] head booking_id=%s user_id=%s maid_id=%s slot=%d", booking.BookingID, booking.UserID, maidID, slot)
 		if err := a.attemptAutoReservation(maid, timeSlotLabel, booking); err != nil {
 			log.Printf("auto reservation attempt failed: booking_id=%s user_id=%s err=%v", booking.BookingID, booking.UserID, err)
 		}
@@ -67,19 +78,25 @@ func (a *App) processReservationQueueForMaidSlot(maid Maid, slot int, timeSlotLa
 }
 
 func (a *App) attemptAutoReservation(maid Maid, timeSlotLabel string, booking sysbookingBookingRecord) error {
+	start := time.Now()
+	log.Printf("[auto_reservation] attempt start booking_id=%s user_id=%s maid_id=%s slot=%s", booking.BookingID, booking.UserID, maid.ID, timeSlotLabel)
 	sessionRecord, err := a.getSysbookingSession(booking.UserID)
 	if err != nil {
+		log.Printf("[auto_reservation] load session failed user_id=%s err=%v", booking.UserID, err)
 		return err
 	}
 	if !sessionRecord.TokenValid {
+		log.Printf("[auto_reservation] skip invalid token user_id=%s", booking.UserID)
 		return nil
 	}
 	if !sessionRecord.FCMToken.Valid || strings.TrimSpace(sessionRecord.FCMToken.String) == "" {
 		// No device token available for notifications. Continue the reservation flow.
+		log.Printf("[auto_reservation] no fcm token user_id=%s", booking.UserID)
 	}
 
 	client, session, err := a.newSupabaseAuthClient(sessionRecord.SBRefreshToken)
 	if err != nil {
+		log.Printf("[auto_reservation] supabase refresh failed user_id=%s err=%v", booking.UserID, err)
 		if err := a.setSysbookingSessionTokenValid(sessionRecord.UserID, false); err != nil {
 			return err
 		}
@@ -102,6 +119,7 @@ func (a *App) attemptAutoReservation(maid Maid, timeSlotLabel string, booking sy
 
 	rpcResult := client.Rpc("add_reservation", "", payload)
 	if rpcResultLooksLikeError(rpcResult) {
+		log.Printf("[auto_reservation] rpc error booking_id=%s user_id=%s result=%s", booking.BookingID, booking.UserID, shortLogValue(rpcResult, 160))
 		if isLikelySupabaseAuthError(rpcResult) {
 			if err := a.setSysbookingSessionTokenValid(sessionRecord.UserID, false); err != nil {
 				return err
@@ -114,6 +132,7 @@ func (a *App) attemptAutoReservation(maid Maid, timeSlotLabel string, booking sy
 	}
 
 	if err := a.markSysbookingBookingDone(booking.BookingID); err != nil {
+		log.Printf("[auto_reservation] mark done failed booking_id=%s err=%v", booking.BookingID, err)
 		return err
 	}
 	if sendErr := a.notifyBookingSuccess(sessionRecord, maid, timeSlotLabel); sendErr != nil {
@@ -124,6 +143,7 @@ func (a *App) attemptAutoReservation(maid Maid, timeSlotLabel string, booking sy
 			return err
 		}
 	}
+	log.Printf("[auto_reservation] attempt ok booking_id=%s user_id=%s dur=%s", booking.BookingID, booking.UserID, time.Since(start))
 	return nil
 }
 

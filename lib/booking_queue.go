@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -83,8 +84,10 @@ type sysbookingBookingRecord struct {
 }
 
 func (a *App) handleSysbookingBookingCreate(c *gin.Context) {
+	log.Printf("[sysbooking.booking.create] request from=%s", c.ClientIP())
 	var req sysbookingBookingCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("[sysbooking.booking.create] invalid json err=%v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
 		return
 	}
@@ -95,19 +98,24 @@ func (a *App) handleSysbookingBookingCreate(c *gin.Context) {
 	}
 	maidID := strings.TrimSpace(req.MaidID)
 	if maidID == "" {
+		log.Printf("[sysbooking.booking.create] missing maid_id user_id=%s", userID)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing maid_id"})
 		return
 	}
 	if !req.Timeslot.valid() {
+		log.Printf("[sysbooking.booking.create] invalid timeslot user_id=%s maid_id=%s timeslot=%v", userID, maidID, req.Timeslot)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid timeslot"})
 		return
 	}
+	log.Printf("[sysbooking.booking.create] check occupancy user_id=%s maid_id=%s timeslot=%d", userID, maidID, req.Timeslot)
 	hasQueue, err := a.hasWaitingSysbookingBooking(maidID, int(req.Timeslot))
 	if err != nil {
+		log.Printf("[sysbooking.booking.create] occupancy check failed user_id=%s maid_id=%s timeslot=%d err=%v", userID, maidID, req.Timeslot, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if hasQueue {
+		log.Printf("[sysbooking.booking.create] slot occupied user_id=%s maid_id=%s timeslot=%d", userID, maidID, req.Timeslot)
 		c.JSON(http.StatusConflict, gin.H{"error": "booking slot already occupied"})
 		return
 	}
@@ -125,9 +133,11 @@ func (a *App) handleSysbookingBookingCreate(c *gin.Context) {
 		UpdatedAt:  now,
 	}
 	if err := a.insertSysbookingBooking(record); err != nil {
+		log.Printf("[sysbooking.booking.create] insert failed user_id=%s booking_id=%s err=%v", userID, record.BookingID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	log.Printf("[sysbooking.booking.create] ok user_id=%s booking_id=%s maid_id=%s timeslot=%d autoqueue=%t with_friend=%t", userID, record.BookingID, maidID, record.Timeslot, record.Autoqueue, record.WithFriend)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"booking_id": record.BookingID,
@@ -135,8 +145,10 @@ func (a *App) handleSysbookingBookingCreate(c *gin.Context) {
 }
 
 func (a *App) handleSysbookingBookingDelete(c *gin.Context) {
+	log.Printf("[sysbooking.booking.delete] request from=%s", c.ClientIP())
 	var req sysbookingBookingDeleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("[sysbooking.booking.delete] invalid json err=%v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
 		return
 	}
@@ -147,6 +159,7 @@ func (a *App) handleSysbookingBookingDelete(c *gin.Context) {
 	}
 	bookingID := strings.TrimSpace(req.BookingID)
 	if bookingID == "" {
+		log.Printf("[sysbooking.booking.delete] missing booking_id user_id=%s", userID)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing booking_id"})
 		return
 	}
@@ -154,30 +167,37 @@ func (a *App) handleSysbookingBookingDelete(c *gin.Context) {
 	record, err := a.getSysbookingBookingByBookingID(bookingID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			log.Printf("[sysbooking.booking.delete] not found booking_id=%s", bookingID)
 			c.JSON(http.StatusNotFound, gin.H{"error": "booking not found"})
 			return
 		}
+		log.Printf("[sysbooking.booking.delete] lookup failed booking_id=%s err=%v", bookingID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if record.UserID != userID {
+		log.Printf("[sysbooking.booking.delete] owner mismatch booking_id=%s owner=%s requester=%s", bookingID, record.UserID, userID)
 		c.JSON(http.StatusForbidden, gin.H{"error": "booking owner mismatch"})
 		return
 	}
 	if record.Status != sysbookingBookingStatusWaiting {
+		log.Printf("[sysbooking.booking.delete] already closed booking_id=%s status=%s", bookingID, record.Status)
 		c.JSON(http.StatusConflict, gin.H{"error": "booking already closed"})
 		return
 	}
 
 	if err := a.cancelSysbookingBooking(record.BookingID, userID); err != nil {
+		log.Printf("[sysbooking.booking.delete] cancel failed booking_id=%s err=%v", bookingID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	log.Printf("[sysbooking.booking.delete] ok booking_id=%s user_id=%s", bookingID, userID)
 
 	c.Status(http.StatusNoContent)
 }
 
 func (a *App) handleSysbookingQueueList(c *gin.Context) {
+	log.Printf("[sysbooking.queuelist] request from=%s", c.ClientIP())
 	userID, err := a.requireSysbookingUserID(c)
 	if err != nil {
 		return
@@ -185,16 +205,20 @@ func (a *App) handleSysbookingQueueList(c *gin.Context) {
 
 	items, err := a.listSysbookingQueueItems(userID)
 	if err != nil {
+		log.Printf("[sysbooking.queuelist] failed user_id=%s err=%v", userID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	log.Printf("[sysbooking.queuelist] ok user_id=%s count=%d", userID, len(items))
 
 	c.JSON(http.StatusOK, items)
 }
 
 func (a *App) handleSysbookingBookingUpdate(c *gin.Context) {
+	log.Printf("[sysbooking.booking.update] request from=%s", c.ClientIP())
 	var req sysbookingBookingUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("[sysbooking.booking.update] invalid json err=%v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
 		return
 	}
@@ -205,6 +229,7 @@ func (a *App) handleSysbookingBookingUpdate(c *gin.Context) {
 	}
 	bookingID := strings.TrimSpace(req.BookingID)
 	if bookingID == "" {
+		log.Printf("[sysbooking.booking.update] missing booking_id user_id=%s", userID)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing booking_id"})
 		return
 	}
@@ -212,34 +237,42 @@ func (a *App) handleSysbookingBookingUpdate(c *gin.Context) {
 	record, err := a.getSysbookingBookingByBookingID(bookingID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			log.Printf("[sysbooking.booking.update] not found booking_id=%s", bookingID)
 			c.JSON(http.StatusNotFound, gin.H{"error": "booking not found"})
 			return
 		}
+		log.Printf("[sysbooking.booking.update] lookup failed booking_id=%s err=%v", bookingID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if record.UserID != userID {
+		log.Printf("[sysbooking.booking.update] owner mismatch booking_id=%s owner=%s requester=%s", bookingID, record.UserID, userID)
 		c.JSON(http.StatusForbidden, gin.H{"error": "booking owner mismatch"})
 		return
 	}
 	if record.Status != sysbookingBookingStatusWaiting {
+		log.Printf("[sysbooking.booking.update] already closed booking_id=%s status=%s", bookingID, record.Status)
 		c.JSON(http.StatusConflict, gin.H{"error": "booking already closed"})
 		return
 	}
 
 	if err := a.updateSysbookingBookingAutoqueue(record.BookingID, req.Autoqueue); err != nil {
+		log.Printf("[sysbooking.booking.update] update failed booking_id=%s err=%v", bookingID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	log.Printf("[sysbooking.booking.update] ok booking_id=%s autoqueue=%t", bookingID, req.Autoqueue)
 
 	c.JSON(http.StatusOK, gin.H{"booking_id": record.BookingID})
 }
 
 func (a *App) handleSysbookingTokenValid(c *gin.Context) {
+	log.Printf("[sysbooking.tokenvalid] request from=%s", c.ClientIP())
 	session, err := a.requireSysbookingSession(c)
 	if err != nil {
 		return
 	}
+	log.Printf("[sysbooking.tokenvalid] ok user_id=%s valid=%t", session.UserID, session.TokenValid)
 
 	c.JSON(http.StatusOK, gin.H{
 		"valid": session.TokenValid,
@@ -257,22 +290,28 @@ func (a *App) requireSysbookingUserID(c *gin.Context) (string, error) {
 func (a *App) requireSysbookingSession(c *gin.Context) (sysbookingSessionRecord, error) {
 	token := strings.TrimSpace(c.GetHeader(sysbookingBookingTokenHeader))
 	if token == "" {
+		log.Printf("[sysbooking.auth] missing x-booking-token from=%s", c.ClientIP())
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing x-booking-token"})
 		return sysbookingSessionRecord{}, errors.New("missing x-booking-token")
 	}
+	log.Printf("[sysbooking.auth] lookup token=%s from=%s", shortLogValue(token, 12), c.ClientIP())
 	session, err := a.getSysbookingSessionByToken(token)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			log.Printf("[sysbooking.auth] invalid token=%s", shortLogValue(token, 12))
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid x-booking-token"})
 			return sysbookingSessionRecord{}, err
 		}
+		log.Printf("[sysbooking.auth] lookup failed token=%s err=%v", shortLogValue(token, 12), err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return sysbookingSessionRecord{}, err
 	}
+	log.Printf("[sysbooking.auth] ok token=%s user_id=%s", shortLogValue(token, 12), session.UserID)
 	return session, nil
 }
 
 func (a *App) getSysbookingSessionByToken(token string) (sysbookingSessionRecord, error) {
+	start := time.Now()
 	row := a.db.QueryRow(
 		`SELECT user_id, sb_refreshtoken, sb_token, fcm_token, notification_enabled, token_valid, token, updated_at
 		 FROM sysbooking_sessions WHERE token = ?`,
@@ -283,6 +322,7 @@ func (a *App) getSysbookingSessionByToken(token string) (sysbookingSessionRecord
 	var notificationEnabled int
 	var tokenValid int
 	if err := row.Scan(&record.UserID, &record.SBRefreshToken, &record.SBToken, &record.FCMToken, &notificationEnabled, &tokenValid, &record.Token, &updatedAt); err != nil {
+		log.Printf("[db] select sysbooking_sessions by token token=%s err=%v dur=%s", shortLogValue(token, 12), err, time.Since(start))
 		return sysbookingSessionRecord{}, err
 	}
 	record.NotificationEnabled = notificationEnabled == 1
@@ -290,10 +330,12 @@ func (a *App) getSysbookingSessionByToken(token string) (sysbookingSessionRecord
 	if t, err := time.Parse(time.RFC3339Nano, updatedAt); err == nil {
 		record.UpdatedAt = t
 	}
+	log.Printf("[db] select sysbooking_sessions by token token=%s user_id=%s token_valid=%t notification_enabled=%t fcm=%t dur=%s", shortLogValue(token, 12), record.UserID, record.TokenValid, record.NotificationEnabled, record.FCMToken.Valid, time.Since(start))
 	return record, nil
 }
 
 func (a *App) insertSysbookingBooking(record sysbookingBookingRecord) error {
+	start := time.Now()
 	_, err := a.db.Exec(
 		`INSERT INTO sysbooking_bookings (booking_id, user_id, maid_id, timeslot, autoqueue, with_friend, status, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -307,10 +349,16 @@ func (a *App) insertSysbookingBooking(record sysbookingBookingRecord) error {
 		record.CreatedAt.UTC().Format(time.RFC3339Nano),
 		record.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	)
-	return err
+	if err != nil {
+		log.Printf("[db] insert sysbooking_bookings booking_id=%s err=%v", record.BookingID, err)
+		return err
+	}
+	log.Printf("[db] insert sysbooking_bookings booking_id=%s user_id=%s maid_id=%s timeslot=%d autoqueue=%t with_friend=%t dur=%s", record.BookingID, record.UserID, record.MaidID, record.Timeslot, record.Autoqueue, record.WithFriend, time.Since(start))
+	return nil
 }
 
 func (a *App) hasWaitingSysbookingBooking(maidID string, timeslot int) (bool, error) {
+	start := time.Now()
 	row := a.db.QueryRow(
 		`SELECT 1
 		 FROM sysbooking_bookings
@@ -323,10 +371,13 @@ func (a *App) hasWaitingSysbookingBooking(maidID string, timeslot int) (bool, er
 	var exists int
 	if err := row.Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			log.Printf("[db] has waiting sysbooking_bookings maid_id=%s timeslot=%d exists=false dur=%s", maidID, timeslot, time.Since(start))
 			return false, nil
 		}
+		log.Printf("[db] has waiting sysbooking_bookings maid_id=%s timeslot=%d err=%v dur=%s", maidID, timeslot, err, time.Since(start))
 		return false, err
 	}
+	log.Printf("[db] has waiting sysbooking_bookings maid_id=%s timeslot=%d exists=true dur=%s", maidID, timeslot, time.Since(start))
 	return true, nil
 }
 
@@ -375,6 +426,7 @@ func (a *App) getWaitingSysbookingBookingHead(maidID string, timeslot int) (sysb
 }
 
 func (a *App) getSysbookingBookingByBookingID(bookingID string) (sysbookingBookingRecord, error) {
+	start := time.Now()
 	row := a.db.QueryRow(
 		`SELECT id, booking_id, user_id, maid_id, timeslot, autoqueue, with_friend, status, created_at, updated_at
 		 FROM sysbooking_bookings WHERE booking_id = ?`,
@@ -397,6 +449,7 @@ func (a *App) getSysbookingBookingByBookingID(bookingID string) (sysbookingBooki
 		&createdAt,
 		&updatedAt,
 	); err != nil {
+		log.Printf("[db] select sysbooking_bookings booking_id=%s err=%v dur=%s", bookingID, err, time.Since(start))
 		return sysbookingBookingRecord{}, err
 	}
 	record.Autoqueue = autoqueue == 1
@@ -407,10 +460,12 @@ func (a *App) getSysbookingBookingByBookingID(bookingID string) (sysbookingBooki
 	if t, err := time.Parse(time.RFC3339Nano, updatedAt); err == nil {
 		record.UpdatedAt = t
 	}
+	log.Printf("[db] select sysbooking_bookings booking_id=%s user_id=%s status=%s autoqueue=%t dur=%s", bookingID, record.UserID, record.Status, record.Autoqueue, time.Since(start))
 	return record, nil
 }
 
 func (a *App) cancelSysbookingBooking(bookingID string, userID string) error {
+	start := time.Now()
 	_, err := a.db.Exec(
 		`UPDATE sysbooking_bookings
 		 SET status = ?, updated_at = ?
@@ -421,7 +476,12 @@ func (a *App) cancelSysbookingBooking(bookingID string, userID string) error {
 		strings.TrimSpace(userID),
 		sysbookingBookingStatusWaiting,
 	)
-	return err
+	if err != nil {
+		log.Printf("[db] cancel sysbooking_bookings booking_id=%s user_id=%s err=%v", bookingID, userID, err)
+		return err
+	}
+	log.Printf("[db] cancel sysbooking_bookings booking_id=%s user_id=%s dur=%s", bookingID, userID, time.Since(start))
+	return nil
 }
 
 func (a *App) markSysbookingBookingDone(bookingID string) error {
@@ -449,6 +509,7 @@ func (a *App) duplicateSysbookingBookingToTail(record sysbookingBookingRecord) e
 }
 
 func (a *App) updateSysbookingBookingAutoqueue(bookingID string, autoqueue bool) error {
+	start := time.Now()
 	_, err := a.db.Exec(
 		`UPDATE sysbooking_bookings
 		 SET autoqueue = ?, updated_at = ?
@@ -458,7 +519,12 @@ func (a *App) updateSysbookingBookingAutoqueue(bookingID string, autoqueue bool)
 		strings.TrimSpace(bookingID),
 		sysbookingBookingStatusWaiting,
 	)
-	return err
+	if err != nil {
+		log.Printf("[db] update sysbooking_bookings autoqueue booking_id=%s err=%v", bookingID, err)
+		return err
+	}
+	log.Printf("[db] update sysbooking_bookings autoqueue booking_id=%s autoqueue=%t dur=%s", bookingID, autoqueue, time.Since(start))
+	return nil
 }
 
 func (a *App) getSysbookingQueueRank(userID, maidID string, timeslot int) (int, bool, error) {
@@ -514,6 +580,7 @@ func (a *App) getSysbookingQueueRankForBooking(maidID string, timeslot int, crea
 }
 
 func (a *App) listSysbookingQueueItems(userID string) ([]sysbookingQueueListItem, error) {
+	start := time.Now()
 	rows, err := a.db.Query(
 		`SELECT id, maid_id, timeslot, autoqueue, created_at
 		 FROM sysbooking_bookings
@@ -523,23 +590,36 @@ func (a *App) listSysbookingQueueItems(userID string) ([]sysbookingQueueListItem
 		sysbookingBookingStatusWaiting,
 	)
 	if err != nil {
+		log.Printf("[db] list sysbooking queue items user_id=%s err=%v", userID, err)
 		return nil, err
 	}
 	defer rows.Close()
 
-	items := make([]sysbookingQueueListItem, 0)
+	type queueRow struct {
+		internalID int64
+		maidID     string
+		timeslot   int
+		autoqueue  int
+		createdAt  string
+	}
+
+	rawRows := make([]queueRow, 0)
 	for rows.Next() {
-		var (
-			internalID int64
-			maidID     string
-			timeslot   int
-			autoqueue  int
-			createdAt  string
-		)
-		if err := rows.Scan(&internalID, &maidID, &timeslot, &autoqueue, &createdAt); err != nil {
+		var item queueRow
+		if err := rows.Scan(&item.internalID, &item.maidID, &item.timeslot, &item.autoqueue, &item.createdAt); err != nil {
+			log.Printf("[db] list sysbooking queue items user_id=%s scan err=%v", userID, err)
 			return nil, err
 		}
-		rank, ok, err := a.getSysbookingQueueRankForBooking(maidID, timeslot, createdAt, internalID)
+		rawRows = append(rawRows, item)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[db] list sysbooking queue items user_id=%s rows err=%v", userID, err)
+		return nil, err
+	}
+
+	items := make([]sysbookingQueueListItem, 0)
+	for _, row := range rawRows {
+		rank, ok, err := a.getSysbookingQueueRankForBooking(row.maidID, row.timeslot, row.createdAt, row.internalID)
 		if err != nil {
 			return nil, err
 		}
@@ -547,15 +627,13 @@ func (a *App) listSysbookingQueueItems(userID string) ([]sysbookingQueueListItem
 			continue
 		}
 		items = append(items, sysbookingQueueListItem{
-			MaidID:    maidID,
-			Timeslot:  timeslot,
+			MaidID:    row.maidID,
+			Timeslot:  row.timeslot,
 			Queue:     rank,
-			Autoqueue: autoqueue == 1,
+			Autoqueue: row.autoqueue == 1,
 		})
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
+	log.Printf("[db] list sysbooking queue items user_id=%s count=%d dur=%s", userID, len(items), time.Since(start))
 	return items, nil
 }
 

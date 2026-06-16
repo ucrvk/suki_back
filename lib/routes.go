@@ -18,6 +18,7 @@ func (a *App) runServer() error {
 	routePrefix = strings.TrimSuffix(routePrefix, "/")
 
 	r := gin.New()
+	r.Use(requestLogMiddleware())
 	r.Use(gin.Recovery())
 	r.Use(cors.New(cors.Config{
 		AllowAllOrigins: true,
@@ -48,6 +49,15 @@ func (a *App) runServer() error {
 	return r.Run(listenAddr)
 }
 
+func requestLogMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		log.Printf("[http] -> %s %s remote=%s ua=%q", c.Request.Method, c.Request.URL.Path, c.ClientIP(), c.Request.UserAgent())
+		c.Next()
+		log.Printf("[http] <- %s %s status=%d dur=%s", c.Request.Method, firstNonEmpty(c.FullPath(), c.Request.URL.Path), c.Writer.Status(), time.Since(start))
+	}
+}
+
 type subscriptionRequest struct {
 	Token string `json:"token"`
 }
@@ -71,13 +81,20 @@ func (a *App) handleSubscriptionMutation(c *gin.Context, add bool) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing token"})
 		return
 	}
+	action := "unsubscribe"
+	if add {
+		action = "subscribe"
+	}
+	log.Printf("[subscription] %s request token=%s", action, shortLogValue(token, 12))
 
 	if add {
 		resp, err := a.subscribeFCMTopic(c.Request.Context(), token, fcmTopicBookingOpen)
 		if err != nil {
+			log.Printf("[subscription] %s failed token=%s err=%v", action, shortLogValue(token, 12), err)
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 			return
 		}
+		log.Printf("[subscription] %s ok token=%s success=%d failure=%d", action, shortLogValue(token, 12), resp.SuccessCount, resp.FailureCount)
 		c.JSON(http.StatusOK, gin.H{
 			"topic":         fcmTopicBookingOpen,
 			"success_count": resp.SuccessCount,
@@ -89,9 +106,11 @@ func (a *App) handleSubscriptionMutation(c *gin.Context, add bool) {
 
 	resp, err := a.unsubscribeFCMTopic(c.Request.Context(), token, fcmTopicBookingOpen)
 	if err != nil {
+		log.Printf("[subscription] %s failed token=%s err=%v", action, shortLogValue(token, 12), err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
+	log.Printf("[subscription] %s ok token=%s success=%d failure=%d", action, shortLogValue(token, 12), resp.SuccessCount, resp.FailureCount)
 
 	c.JSON(http.StatusOK, gin.H{
 		"topic":         fcmTopicBookingOpen,
