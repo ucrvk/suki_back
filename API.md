@@ -121,7 +121,7 @@
 
 - 生成一个 64 位随机本地 `token`
 - 将会话信息写入本地 SQLite
-- 同一个 `user_id` 已存在时直接覆盖更新
+- 同一个 `user_id` 可以同时保留多个有效 `token`
 
 #### 请求体
 
@@ -160,17 +160,51 @@
 
 ### `GET /sysbooking/tokenvalid`
 
-查询当前登录用户的 `sb_token` 是否可用。
+查询当前会话对应的 Supabase `sb_token` 是否可用。
+
+#### 说明
+
+- 该接口仍然使用 `x-booking-token` 定位本地会话
+- 如果会话存在且 `sb_token` 仍有效，返回 `valid: true`
+- 如果会话存在但 `sb_token` 已失效，返回 `valid: false`
+- 如果本地会话不存在，返回 `401 Unauthorized`
 
 #### 请求头
 
-- `x-booking-token`：登录 token
+- `x-booking-token`：本地登录 token，用于定位会话
 
 #### 响应示例
 
 ```json
 {
   "valid": true
+}
+```
+
+#### 状态码
+
+- `200 OK`
+- `401 Unauthorized`
+- `500 Internal Server Error`
+
+---
+
+### `GET /sysbooking/logout`
+
+保留当前 `x-booking-token`，并将同一 `user_id` 下其他所有 token 置为失效。
+
+#### 请求头
+
+- `x-booking-token`：当前登录 token
+
+#### 响应示例
+
+```json
+{
+  "user_id": "052554e2-b3c9-40d9-a947-9c1da6f2a63d",
+  "token": "64-char-local-token",
+  "invalidated_count": 2,
+  "current_token_valid": true
 }
 ```
 
@@ -359,7 +393,7 @@
 
 ### `PUT /sysbooking/notification`
 
-更新当前登录用户的 FCM token 和通知开关。
+更新当前登录 token 对应会话的 FCM token 和通知开关。
 
 #### 请求头
 

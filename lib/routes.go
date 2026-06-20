@@ -35,6 +35,7 @@ func (a *App) runServer() error {
 
 	router.POST("/sysbooking/login", a.handleSysbookingLogin)
 	router.GET("/sysbooking/tokenvalid", a.handleSysbookingTokenValid)
+	router.GET("/sysbooking/logout", a.handleSysbookingLogout)
 	router.POST("/sysbooking/booking", a.handleSysbookingBookingCreate)
 	router.PUT("/sysbooking/booking", a.handleSysbookingBookingUpdate)
 	router.DELETE("/sysbooking/booking", a.handleSysbookingBookingDelete)

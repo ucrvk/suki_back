@@ -416,13 +416,13 @@ func initSchema(db *sql.DB) error {
 			updated_at TEXT NOT NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS sysbooking_sessions (
-			user_id TEXT PRIMARY KEY,
+			token TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
 			sb_refreshtoken TEXT NOT NULL,
 			sb_token TEXT NOT NULL,
 			fcm_token TEXT,
 			notification_enabled INTEGER NOT NULL DEFAULT 0 CHECK(notification_enabled IN (0, 1)),
 			token_valid INTEGER NOT NULL DEFAULT 1 CHECK(token_valid IN (0, 1)),
-			token TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS sysbooking_bookings (
@@ -447,6 +447,86 @@ func initSchema(db *sql.DB) error {
 		if _, err := db.Exec(stmt); err != nil {
 			return err
 		}
+	}
+	if err := ensureSysbookingSessionsSchema(db); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_sysbooking_sessions_user_valid_updated
+		ON sysbooking_sessions (user_id, token_valid, updated_at DESC, token DESC)`); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureSysbookingSessionsSchema(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(sysbooking_sessions)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type columnInfo struct {
+		name string
+		pk   int
+	}
+	columns := make(map[string]columnInfo)
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull int
+		var dfltValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		columns[name] = columnInfo{name: name, pk: pk}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	if len(columns) == 0 {
+		return nil
+	}
+	if col, ok := columns["token"]; ok && col.pk > 0 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err = tx.Exec(`ALTER TABLE sysbooking_sessions RENAME TO sysbooking_sessions_legacy`); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`CREATE TABLE sysbooking_sessions (
+		token TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		sb_refreshtoken TEXT NOT NULL,
+		sb_token TEXT NOT NULL,
+		fcm_token TEXT,
+		notification_enabled INTEGER NOT NULL DEFAULT 0 CHECK(notification_enabled IN (0, 1)),
+		token_valid INTEGER NOT NULL DEFAULT 1 CHECK(token_valid IN (0, 1)),
+		updated_at TEXT NOT NULL
+	)`); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`INSERT INTO sysbooking_sessions (token, user_id, sb_refreshtoken, sb_token, fcm_token, notification_enabled, token_valid, updated_at)
+		SELECT token, user_id, sb_refreshtoken, sb_token, fcm_token, notification_enabled, token_valid, updated_at
+		FROM sysbooking_sessions_legacy`); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`DROP TABLE sysbooking_sessions_legacy`); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
 	}
 	return nil
 }

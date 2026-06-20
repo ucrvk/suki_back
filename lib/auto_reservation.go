@@ -1,7 +1,9 @@
 package lib
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -80,8 +82,12 @@ func (a *App) processReservationQueueForMaidSlot(maid Maid, slot int, timeSlotLa
 func (a *App) attemptAutoReservation(maid Maid, timeSlotLabel string, booking sysbookingBookingRecord) error {
 	start := time.Now()
 	log.Printf("[auto_reservation] attempt start booking_id=%s user_id=%s maid_id=%s slot=%s", booking.BookingID, booking.UserID, maid.ID, timeSlotLabel)
-	sessionRecord, err := a.getSysbookingSession(booking.UserID)
+	sessionRecord, err := a.getLatestValidSysbookingSession(booking.UserID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Printf("[auto_reservation] no valid session user_id=%s", booking.UserID)
+			return nil
+		}
 		log.Printf("[auto_reservation] load session failed user_id=%s err=%v", booking.UserID, err)
 		return err
 	}
@@ -97,7 +103,7 @@ func (a *App) attemptAutoReservation(maid Maid, timeSlotLabel string, booking sy
 	client, session, err := a.newSupabaseAuthClient(sessionRecord.SBRefreshToken)
 	if err != nil {
 		log.Printf("[auto_reservation] supabase refresh failed user_id=%s err=%v", booking.UserID, err)
-		if err := a.setSysbookingSessionTokenValid(sessionRecord.UserID, false); err != nil {
+		if err := a.setSysbookingSessionTokenValidByToken(sessionRecord.Token, false); err != nil {
 			return err
 		}
 		if sendErr := a.notifyBookingTokenInvalid(sessionRecord, maid, timeSlotLabel); sendErr != nil {
@@ -122,7 +128,7 @@ func (a *App) attemptAutoReservation(maid Maid, timeSlotLabel string, booking sy
 	if rpcResultLooksLikeError(rpcResult) {
 		log.Printf("[auto_reservation] rpc error booking_id=%s user_id=%s result=%s", booking.BookingID, booking.UserID, shortLogValue(rpcResult, 160))
 		if isLikelySupabaseAuthError(rpcResult) {
-			if err := a.setSysbookingSessionTokenValid(sessionRecord.UserID, false); err != nil {
+			if err := a.setSysbookingSessionTokenValidByToken(sessionRecord.Token, false); err != nil {
 				return err
 			}
 			if sendErr := a.notifyBookingTokenInvalid(sessionRecord, maid, timeSlotLabel); sendErr != nil {

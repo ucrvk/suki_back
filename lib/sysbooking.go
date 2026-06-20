@@ -125,10 +125,11 @@ func (a *App) handleSysbookingNotificationUpdate(c *gin.Context) {
 		return
 	}
 
-	userID, err := a.requireSysbookingUserID(c)
+	session, err := a.requireSysbookingSession(c)
 	if err != nil {
 		return
 	}
+	userID := session.UserID
 
 	fcmToken := strings.TrimSpace(req.FCMToken)
 	if fcmToken == "" {
@@ -142,10 +143,10 @@ func (a *App) handleSysbookingNotificationUpdate(c *gin.Context) {
 		return
 	}
 
-	log.Printf("[sysbooking.notification] update user_id=%s fcm=%s notification=%t", userID, shortLogValue(fcmToken, 12), *req.Notification)
-	if err := a.updateSysbookingSessionNotification(userID, fcmToken, *req.Notification); err != nil {
+	log.Printf("[sysbooking.notification] update user_id=%s token=%s fcm=%s notification=%t", userID, shortLogValue(session.Token, 12), shortLogValue(fcmToken, 12), *req.Notification)
+	if err := a.updateSysbookingSessionNotificationByToken(session.Token, fcmToken, *req.Notification); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			log.Printf("[sysbooking.notification] session not found user_id=%s", userID)
+			log.Printf("[sysbooking.notification] session not found user_id=%s token=%s", userID, shortLogValue(session.Token, 12))
 			c.JSON(http.StatusNotFound, gin.H{"error": "sysbooking session not found"})
 			return
 		}
@@ -162,12 +163,74 @@ func (a *App) handleSysbookingNotificationUpdate(c *gin.Context) {
 	})
 }
 
+func (a *App) handleSysbookingLogout(c *gin.Context) {
+	log.Printf("[sysbooking.logout] request from=%s", c.ClientIP())
+	session, err := a.requireSysbookingSession(c)
+	if err != nil {
+		return
+	}
+
+	invalidatedCount, err := a.invalidateOtherSysbookingSessions(session.UserID, session.Token)
+	if err != nil {
+		log.Printf("[sysbooking.logout] invalidate failed user_id=%s token=%s err=%v", session.UserID, shortLogValue(session.Token, 12), err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	log.Printf("[sysbooking.logout] ok user_id=%s token=%s invalidated_count=%d", session.UserID, shortLogValue(session.Token, 12), invalidatedCount)
+
+	c.JSON(http.StatusOK, gin.H{
+		"user_id":             session.UserID,
+		"token":               session.Token,
+		"invalidated_count":   invalidatedCount,
+		"current_token_valid": true,
+	})
+}
+
 func (a *App) refreshSupabaseSession(refreshToken string) (supabaseRefreshSession, error) {
 	_, session, err := a.newSupabaseAuthClient(refreshToken)
 	if err != nil {
 		return supabaseRefreshSession{}, err
 	}
 	return session, nil
+}
+
+func (a *App) isSupabaseAccessTokenValid(accessToken string) (bool, error) {
+	accessToken = strings.TrimSpace(accessToken)
+	if accessToken == "" {
+		return false, nil
+	}
+
+	client, err := supabase.NewClient(a.cfg.SupabaseURL, a.cfg.SupabaseKey, &supabase.ClientOptions{
+		Schema: "public",
+		Headers: map[string]string{
+			"User-Agent": supabaseUserAgent,
+		},
+	})
+	if err != nil {
+		return false, err
+	}
+
+	_, err = client.Auth.WithToken(accessToken).GetUser()
+	if err != nil {
+		if isSupabaseAccessTokenUnauthorized(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func isSupabaseAccessTokenUnauthorized(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	var statusCode int
+	if _, scanErr := fmt.Sscanf(msg, "response status code %d", &statusCode); scanErr == nil {
+		return statusCode >= 400 && statusCode < 500
+	}
+	return strings.Contains(msg, "invalid jwt") ||
+		strings.Contains(msg, "jwt expired")
 }
 
 func (a *App) newSupabaseAuthClient(refreshToken string) (*supabase.Client, supabaseRefreshSession, error) {
@@ -220,64 +283,67 @@ func generateLocalToken64() (string, error) {
 func (a *App) upsertSysbookingSession(record sysbookingSessionRecord) error {
 	start := time.Now()
 	_, err := a.db.Exec(
-		`INSERT INTO sysbooking_sessions (user_id, sb_refreshtoken, sb_token, fcm_token, token_valid, token, updated_at)
+		`INSERT INTO sysbooking_sessions (token, user_id, sb_refreshtoken, sb_token, fcm_token, token_valid, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(user_id) DO UPDATE SET
+		 ON CONFLICT(token) DO UPDATE SET
+		   user_id=excluded.user_id,
 		   sb_refreshtoken=excluded.sb_refreshtoken,
 		   sb_token=excluded.sb_token,
 		   fcm_token=COALESCE(excluded.fcm_token, sysbooking_sessions.fcm_token),
 		   token_valid=excluded.token_valid,
-		   token=excluded.token,
 		   updated_at=excluded.updated_at`,
+		record.Token,
 		record.UserID,
 		record.SBRefreshToken,
 		record.SBToken,
 		record.FCMToken,
 		boolToInt(record.TokenValid),
-		record.Token,
 		record.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	)
 	if err != nil {
-		log.Printf("[db] upsert sysbooking_sessions user_id=%s err=%v", record.UserID, err)
+		log.Printf("[db] upsert sysbooking_sessions user_id=%s token=%s err=%v", record.UserID, shortLogValue(record.Token, 12), err)
 		return err
 	}
-	log.Printf("[db] upsert sysbooking_sessions user_id=%s fcm=%t notification_enabled=%t token_valid=%t dur=%s", record.UserID, record.FCMToken.Valid, record.NotificationEnabled, record.TokenValid, time.Since(start))
+	log.Printf("[db] upsert sysbooking_sessions user_id=%s token=%s fcm=%t notification_enabled=%t token_valid=%t dur=%s", record.UserID, shortLogValue(record.Token, 12), record.FCMToken.Valid, record.NotificationEnabled, record.TokenValid, time.Since(start))
 	return nil
 }
 
-func (a *App) updateSysbookingSessionNotification(userID, fcmToken string, enabled bool) error {
+func (a *App) updateSysbookingSessionNotificationByToken(token, fcmToken string, enabled bool) error {
 	start := time.Now()
 	result, err := a.db.Exec(
 		`UPDATE sysbooking_sessions
 		 SET fcm_token = ?, notification_enabled = ?, updated_at = ?
-		 WHERE user_id = ?`,
+		 WHERE token = ?`,
 		strings.TrimSpace(fcmToken),
 		boolToInt(enabled),
 		time.Now().UTC().Format(time.RFC3339Nano),
-		strings.TrimSpace(userID),
+		strings.TrimSpace(token),
 	)
 	if err != nil {
-		log.Printf("[db] update sysbooking_sessions notification user_id=%s err=%v", userID, err)
+		log.Printf("[db] update sysbooking_sessions notification token=%s err=%v", shortLogValue(token, 12), err)
 		return err
 	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		log.Printf("[db] update sysbooking_sessions notification user_id=%s rows_affected err=%v", userID, err)
+		log.Printf("[db] update sysbooking_sessions notification token=%s rows_affected err=%v", shortLogValue(token, 12), err)
 		return err
 	}
 	if rowsAffected == 0 {
-		log.Printf("[db] update sysbooking_sessions notification user_id=%s not found", userID)
+		log.Printf("[db] update sysbooking_sessions notification token=%s not found", shortLogValue(token, 12))
 		return sql.ErrNoRows
 	}
-	log.Printf("[db] update sysbooking_sessions notification user_id=%s fcm=%s enabled=%t dur=%s", userID, shortLogValue(fcmToken, 12), enabled, time.Since(start))
+	log.Printf("[db] update sysbooking_sessions notification token=%s fcm=%s enabled=%t dur=%s", shortLogValue(token, 12), shortLogValue(fcmToken, 12), enabled, time.Since(start))
 	return nil
 }
 
-func (a *App) getSysbookingSession(userID string) (sysbookingSessionRecord, error) {
+func (a *App) getLatestValidSysbookingSession(userID string) (sysbookingSessionRecord, error) {
 	start := time.Now()
 	row := a.db.QueryRow(
 		`SELECT user_id, sb_refreshtoken, sb_token, fcm_token, notification_enabled, token_valid, token, updated_at
-		 FROM sysbooking_sessions WHERE user_id = ?`,
+		 FROM sysbooking_sessions
+		 WHERE user_id = ? AND token_valid = 1
+		 ORDER BY updated_at DESC, token DESC
+		 LIMIT 1`,
 		userID,
 	)
 	var record sysbookingSessionRecord
@@ -293,12 +359,12 @@ func (a *App) getSysbookingSession(userID string) (sysbookingSessionRecord, erro
 	if t, err := time.Parse(time.RFC3339Nano, updatedAt); err == nil {
 		record.UpdatedAt = t
 	}
-	log.Printf("[db] select sysbooking_sessions user_id=%s found token_valid=%t notification_enabled=%t fcm=%t dur=%s", userID, record.TokenValid, record.NotificationEnabled, record.FCMToken.Valid, time.Since(start))
+	log.Printf("[db] select latest valid sysbooking_sessions user_id=%s token=%s token_valid=%t notification_enabled=%t fcm=%t dur=%s", userID, shortLogValue(record.Token, 12), record.TokenValid, record.NotificationEnabled, record.FCMToken.Valid, time.Since(start))
 	return record, nil
 }
 
 func (a *App) hasSysbookingSession(userID string) (bool, error) {
-	_, err := a.getSysbookingSession(userID)
+	_, err := a.getLatestValidSysbookingSession(userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -308,22 +374,45 @@ func (a *App) hasSysbookingSession(userID string) (bool, error) {
 	return true, nil
 }
 
-func (a *App) setSysbookingSessionTokenValid(userID string, valid bool) error {
+func (a *App) setSysbookingSessionTokenValidByToken(token string, valid bool) error {
 	start := time.Now()
 	_, err := a.db.Exec(
 		`UPDATE sysbooking_sessions
 		 SET token_valid = ?, updated_at = ?
-		 WHERE user_id = ?`,
+		 WHERE token = ?`,
 		boolToInt(valid),
 		time.Now().UTC().Format(time.RFC3339Nano),
-		strings.TrimSpace(userID),
+		strings.TrimSpace(token),
 	)
 	if err != nil {
-		log.Printf("[db] update sysbooking_sessions token_valid user_id=%s valid=%t err=%v", userID, valid, err)
+		log.Printf("[db] update sysbooking_sessions token_valid token=%s valid=%t err=%v", shortLogValue(token, 12), valid, err)
 		return err
 	}
-	log.Printf("[db] update sysbooking_sessions token_valid user_id=%s valid=%t dur=%s", userID, valid, time.Since(start))
+	log.Printf("[db] update sysbooking_sessions token_valid token=%s valid=%t dur=%s", shortLogValue(token, 12), valid, time.Since(start))
 	return err
+}
+
+func (a *App) invalidateOtherSysbookingSessions(userID, keepToken string) (int64, error) {
+	start := time.Now()
+	result, err := a.db.Exec(
+		`UPDATE sysbooking_sessions
+		 SET token_valid = 0, updated_at = ?
+		 WHERE user_id = ? AND token <> ? AND token_valid = 1`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		strings.TrimSpace(userID),
+		strings.TrimSpace(keepToken),
+	)
+	if err != nil {
+		log.Printf("[db] invalidate sysbooking_sessions user_id=%s keep_token=%s err=%v", userID, shortLogValue(keepToken, 12), err)
+		return 0, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("[db] invalidate sysbooking_sessions user_id=%s keep_token=%s rows_affected err=%v", userID, shortLogValue(keepToken, 12), err)
+		return 0, err
+	}
+	log.Printf("[db] invalidate sysbooking_sessions user_id=%s keep_token=%s invalidated=%d dur=%s", userID, shortLogValue(keepToken, 12), rowsAffected, time.Since(start))
+	return rowsAffected, nil
 }
 
 func guestUsernameFromSession(session supabaseRefreshSession) string {

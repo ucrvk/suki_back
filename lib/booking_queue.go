@@ -297,14 +297,33 @@ func (a *App) handleSysbookingBookingUpdate(c *gin.Context) {
 
 func (a *App) handleSysbookingTokenValid(c *gin.Context) {
 	log.Printf("[sysbooking.tokenvalid] request from=%s", c.ClientIP())
-	session, err := a.requireSysbookingSession(c)
-	if err != nil {
+	token := strings.TrimSpace(c.GetHeader(sysbookingBookingTokenHeader))
+	if token == "" {
+		log.Printf("[sysbooking.tokenvalid] missing x-booking-token from=%s", c.ClientIP())
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing x-booking-token"})
 		return
 	}
-	log.Printf("[sysbooking.tokenvalid] ok user_id=%s valid=%t", session.UserID, session.TokenValid)
+	session, err := a.getSysbookingSessionByToken(token)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Printf("[sysbooking.tokenvalid] invalid token=%s", shortLogValue(token, 12))
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid x-booking-token"})
+			return
+		}
+		log.Printf("[sysbooking.tokenvalid] lookup failed token=%s err=%v", shortLogValue(token, 12), err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	valid, err := a.isSupabaseAccessTokenValid(session.SBToken)
+	if err != nil {
+		log.Printf("[sysbooking.tokenvalid] supabase token check failed user_id=%s token=%s err=%v", session.UserID, shortLogValue(session.Token, 12), err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	log.Printf("[sysbooking.tokenvalid] ok user_id=%s token=%s sb_token_valid=%t", session.UserID, shortLogValue(session.Token, 12), valid)
 
 	c.JSON(http.StatusOK, gin.H{
-		"valid": session.TokenValid,
+		"valid": valid,
 	})
 }
 
@@ -334,6 +353,11 @@ func (a *App) requireSysbookingSession(c *gin.Context) (sysbookingSessionRecord,
 		log.Printf("[sysbooking.auth] lookup failed token=%s err=%v", shortLogValue(token, 12), err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return sysbookingSessionRecord{}, err
+	}
+	if !session.TokenValid {
+		log.Printf("[sysbooking.auth] token disabled token=%s user_id=%s", shortLogValue(token, 12), session.UserID)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid x-booking-token"})
+		return sysbookingSessionRecord{}, sql.ErrNoRows
 	}
 	log.Printf("[sysbooking.auth] ok token=%s user_id=%s", shortLogValue(token, 12), session.UserID)
 	return session, nil
