@@ -197,7 +197,8 @@
   "maid_id": "maid_xxx",
   "timeslot": 21,
   "autoqueue": true,
-  "with_friend": false
+  "with_friend": false,
+  "friend_vrcid": ""
 }
 ```
 
@@ -207,6 +208,7 @@
 - `timeslot`：只能是 `21` 或 `22`
 - `autoqueue`：是否标记为自动排队
 - `with_friend`：是否带朋友一起预约
+- `friend_vrcid`：朋友的 VRCID，可选，默认 `""`
 
 #### 响应示例
 
@@ -274,6 +276,8 @@
   {
     "booking_id": "f4c3d2b1a09876543210fedcba987654",
     "maid_id": "maid_xxx",
+    "with_friend": false,
+    "friend_vrcid": "friend_vrcid_xxx",
     "timeslot": 21,
     "queue": 0,
     "autoqueue": true
@@ -285,6 +289,8 @@
 
 - `maid_id`：maid ID
 - `booking_id`：预约 ID
+- `with_friend`：是否带朋友一起预约
+- `friend_vrcid`：朋友的 VRCID
 - `timeslot`：预约时段
 - `queue`：当前队列前面有多少人，`0` 表示前面没人
 - `autoqueue`：是否标记为自动排队
@@ -300,7 +306,7 @@
 
 ### `PUT /sysbooking/booking`
 
-仅修改指定 booking 的 `autoqueue`。
+仅修改指定 booking 的 `autoqueue`、`with_friend` 和/或 `friend_vrcid`。
 
 #### 请求头
 
@@ -311,20 +317,25 @@
 ```json
 {
   "booking_id": "f4c3d2b1a09876543210fedcba987654",
-  "autoqueue": true
+  "autoqueue": true,
+  "with_friend": false,
+  "friend_vrcid": "friend_vrcid_xxx"
 }
 ```
 
 #### 字段说明
 
 - `booking_id`：要修改的 booking ID
-- `autoqueue`：新的自动排队状态
+- `autoqueue`：新的自动排队状态，可选
+- `with_friend`：新的是否带朋友状态，可选
+- `friend_vrcid`：新的朋友 VRCID，可选
 
 #### 说明
 
-- 只会修改 `autoqueue`
-- 不会修改 `maid_id`、`timeslot`、`with_friend`、`status` 等其他字段
+- 只会修改传入的字段
+- 不会修改 `maid_id`、`timeslot`、`status` 等其他字段
 - 仅允许修改当前登录用户自己的、且状态为 `waiting` 的 booking
+- 至少需要传入 `autoqueue`、`with_friend` 或 `friend_vrcid` 其中一个
 
 #### 响应示例
 

@@ -115,6 +115,7 @@ func (a *App) attemptAutoReservation(maid Maid, timeSlotLabel string, booking sy
 		"p_time":           formatZhCnNow(),
 		"p_created_at":     time.Now().UTC().UnixMilli(),
 		"p_with_friend":    booking.WithFriend,
+		"p_friend_vrcid":   strings.TrimSpace(booking.FriendVRCID),
 	}
 
 	rpcResult := client.Rpc("add_reservation", "", payload)

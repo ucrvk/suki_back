@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	defaultPollInterval       = 10 * time.Second
+	defaultPollInterval       = 5 * time.Second
 	appStateBookingEnabledKey = "booking_enabled"
 )
 

@@ -433,6 +433,7 @@ func initSchema(db *sql.DB) error {
 			timeslot INTEGER NOT NULL CHECK(timeslot IN (21, 22)),
 			autoqueue INTEGER NOT NULL CHECK(autoqueue IN (0, 1)),
 			with_friend INTEGER NOT NULL DEFAULT 0 CHECK(with_friend IN (0, 1)),
+			friend_vrcid TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL

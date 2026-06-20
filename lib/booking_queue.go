@@ -48,10 +48,11 @@ func (t bookingTimeslot) valid() bool {
 }
 
 type sysbookingBookingCreateRequest struct {
-	MaidID     string          `json:"maid_id"`
-	Timeslot   bookingTimeslot `json:"timeslot"`
-	Autoqueue  bool            `json:"autoqueue"`
-	WithFriend bool            `json:"with_friend"`
+	MaidID      string          `json:"maid_id"`
+	Timeslot    bookingTimeslot `json:"timeslot"`
+	Autoqueue   bool            `json:"autoqueue"`
+	WithFriend  bool            `json:"with_friend"`
+	FriendVRCID string          `json:"friend_vrcid"`
 }
 
 type sysbookingBookingDeleteRequest struct {
@@ -59,29 +60,34 @@ type sysbookingBookingDeleteRequest struct {
 }
 
 type sysbookingBookingUpdateRequest struct {
-	BookingID string `json:"booking_id"`
-	Autoqueue bool   `json:"autoqueue"`
+	BookingID   string  `json:"booking_id"`
+	Autoqueue   *bool   `json:"autoqueue"`
+	WithFriend  *bool   `json:"with_friend"`
+	FriendVRCID *string `json:"friend_vrcid"`
 }
 
 type sysbookingQueueListItem struct {
-	BookingID string `json:"booking_id"`
-	MaidID    string `json:"maid_id"`
-	Timeslot  int    `json:"timeslot"`
-	Queue     int    `json:"queue"`
-	Autoqueue bool   `json:"autoqueue"`
+	BookingID   string `json:"booking_id"`
+	MaidID      string `json:"maid_id"`
+	WithFriend  bool   `json:"with_friend"`
+	FriendVRCID string `json:"friend_vrcid"`
+	Timeslot    int    `json:"timeslot"`
+	Queue       int    `json:"queue"`
+	Autoqueue   bool   `json:"autoqueue"`
 }
 
 type sysbookingBookingRecord struct {
-	InternalID int64
-	BookingID  string
-	UserID     string
-	MaidID     string
-	Timeslot   int
-	Autoqueue  bool
-	WithFriend bool
-	Status     string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	InternalID  int64
+	BookingID   string
+	UserID      string
+	MaidID      string
+	Timeslot    int
+	Autoqueue   bool
+	WithFriend  bool
+	FriendVRCID string
+	Status      string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 func (a *App) handleSysbookingBookingCreate(c *gin.Context) {
@@ -123,22 +129,23 @@ func (a *App) handleSysbookingBookingCreate(c *gin.Context) {
 
 	now := time.Now().UTC()
 	record := sysbookingBookingRecord{
-		BookingID:  generateBookingID(),
-		UserID:     userID,
-		MaidID:     maidID,
-		Timeslot:   int(req.Timeslot),
-		Autoqueue:  req.Autoqueue,
-		WithFriend: req.WithFriend,
-		Status:     sysbookingBookingStatusWaiting,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		BookingID:   generateBookingID(),
+		UserID:      userID,
+		MaidID:      maidID,
+		Timeslot:    int(req.Timeslot),
+		Autoqueue:   req.Autoqueue,
+		WithFriend:  req.WithFriend,
+		FriendVRCID: strings.TrimSpace(req.FriendVRCID),
+		Status:      sysbookingBookingStatusWaiting,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	if err := a.insertSysbookingBooking(record); err != nil {
 		log.Printf("[sysbooking.booking.create] insert failed user_id=%s booking_id=%s err=%v", userID, record.BookingID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	log.Printf("[sysbooking.booking.create] ok user_id=%s booking_id=%s maid_id=%s timeslot=%d autoqueue=%t with_friend=%t", userID, record.BookingID, maidID, record.Timeslot, record.Autoqueue, record.WithFriend)
+	log.Printf("[sysbooking.booking.create] ok user_id=%s booking_id=%s maid_id=%s timeslot=%d autoqueue=%t with_friend=%t friend_vrcid=%q", userID, record.BookingID, maidID, record.Timeslot, record.Autoqueue, record.WithFriend, record.FriendVRCID)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"booking_id": record.BookingID,
@@ -234,6 +241,11 @@ func (a *App) handleSysbookingBookingUpdate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing booking_id"})
 		return
 	}
+	if req.Autoqueue == nil && req.WithFriend == nil && req.FriendVRCID == nil {
+		log.Printf("[sysbooking.booking.update] missing update fields user_id=%s booking_id=%s", userID, bookingID)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing autoqueue, with_friend or friend_vrcid"})
+		return
+	}
 
 	record, err := a.getSysbookingBookingByBookingID(bookingID)
 	if err != nil {
@@ -257,12 +269,28 @@ func (a *App) handleSysbookingBookingUpdate(c *gin.Context) {
 		return
 	}
 
-	if err := a.updateSysbookingBookingAutoqueue(record.BookingID, req.Autoqueue); err != nil {
+	var friendVRCID *string
+	if req.FriendVRCID != nil {
+		trimmed := strings.TrimSpace(*req.FriendVRCID)
+		friendVRCID = &trimmed
+	}
+
+	if err := a.updateSysbookingBookingFields(record.BookingID, req.Autoqueue, req.WithFriend, friendVRCID); err != nil {
 		log.Printf("[sysbooking.booking.update] update failed booking_id=%s err=%v", bookingID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	log.Printf("[sysbooking.booking.update] ok booking_id=%s autoqueue=%t", bookingID, req.Autoqueue)
+	logParts := make([]string, 0, 3)
+	if req.Autoqueue != nil {
+		logParts = append(logParts, fmt.Sprintf("autoqueue=%t", *req.Autoqueue))
+	}
+	if req.WithFriend != nil {
+		logParts = append(logParts, fmt.Sprintf("with_friend=%t", *req.WithFriend))
+	}
+	if friendVRCID != nil {
+		logParts = append(logParts, fmt.Sprintf("friend_vrcid=%q", *friendVRCID))
+	}
+	log.Printf("[sysbooking.booking.update] ok booking_id=%s %s", bookingID, strings.Join(logParts, " "))
 
 	c.JSON(http.StatusOK, gin.H{"booking_id": record.BookingID})
 }
@@ -338,14 +366,15 @@ func (a *App) getSysbookingSessionByToken(token string) (sysbookingSessionRecord
 func (a *App) insertSysbookingBooking(record sysbookingBookingRecord) error {
 	start := time.Now()
 	_, err := a.db.Exec(
-		`INSERT INTO sysbooking_bookings (booking_id, user_id, maid_id, timeslot, autoqueue, with_friend, status, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO sysbooking_bookings (booking_id, user_id, maid_id, timeslot, autoqueue, with_friend, friend_vrcid, status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.BookingID,
 		record.UserID,
 		record.MaidID,
 		record.Timeslot,
 		boolToInt(record.Autoqueue),
 		boolToInt(record.WithFriend),
+		record.FriendVRCID,
 		record.Status,
 		record.CreatedAt.UTC().Format(time.RFC3339Nano),
 		record.UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -354,7 +383,7 @@ func (a *App) insertSysbookingBooking(record sysbookingBookingRecord) error {
 		log.Printf("[db] insert sysbooking_bookings booking_id=%s err=%v", record.BookingID, err)
 		return err
 	}
-	log.Printf("[db] insert sysbooking_bookings booking_id=%s user_id=%s maid_id=%s timeslot=%d autoqueue=%t with_friend=%t dur=%s", record.BookingID, record.UserID, record.MaidID, record.Timeslot, record.Autoqueue, record.WithFriend, time.Since(start))
+	log.Printf("[db] insert sysbooking_bookings booking_id=%s user_id=%s maid_id=%s timeslot=%d autoqueue=%t with_friend=%t friend_vrcid=%q dur=%s", record.BookingID, record.UserID, record.MaidID, record.Timeslot, record.Autoqueue, record.WithFriend, record.FriendVRCID, time.Since(start))
 	return nil
 }
 
@@ -384,7 +413,7 @@ func (a *App) hasWaitingSysbookingBooking(maidID string, timeslot int) (bool, er
 
 func (a *App) getWaitingSysbookingBookingHead(maidID string, timeslot int) (sysbookingBookingRecord, bool, error) {
 	row := a.db.QueryRow(
-		`SELECT id, booking_id, user_id, maid_id, timeslot, autoqueue, with_friend, status, created_at, updated_at
+		`SELECT id, booking_id, user_id, maid_id, timeslot, autoqueue, with_friend, friend_vrcid, status, created_at, updated_at
 		 FROM sysbooking_bookings
 		 WHERE maid_id = ? AND timeslot = ? AND status = ?
 		 ORDER BY created_at ASC, id ASC
@@ -396,6 +425,7 @@ func (a *App) getWaitingSysbookingBookingHead(maidID string, timeslot int) (sysb
 	var record sysbookingBookingRecord
 	var autoqueue int
 	var withFriend int
+	var friendVRCID string
 	var createdAt string
 	var updatedAt string
 	if err := row.Scan(
@@ -406,6 +436,7 @@ func (a *App) getWaitingSysbookingBookingHead(maidID string, timeslot int) (sysb
 		&record.Timeslot,
 		&autoqueue,
 		&withFriend,
+		&friendVRCID,
 		&record.Status,
 		&createdAt,
 		&updatedAt,
@@ -417,6 +448,7 @@ func (a *App) getWaitingSysbookingBookingHead(maidID string, timeslot int) (sysb
 	}
 	record.Autoqueue = autoqueue == 1
 	record.WithFriend = withFriend == 1
+	record.FriendVRCID = strings.TrimSpace(friendVRCID)
 	if t, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
 		record.CreatedAt = t
 	}
@@ -429,13 +461,14 @@ func (a *App) getWaitingSysbookingBookingHead(maidID string, timeslot int) (sysb
 func (a *App) getSysbookingBookingByBookingID(bookingID string) (sysbookingBookingRecord, error) {
 	start := time.Now()
 	row := a.db.QueryRow(
-		`SELECT id, booking_id, user_id, maid_id, timeslot, autoqueue, with_friend, status, created_at, updated_at
+		`SELECT id, booking_id, user_id, maid_id, timeslot, autoqueue, with_friend, friend_vrcid, status, created_at, updated_at
 		 FROM sysbooking_bookings WHERE booking_id = ?`,
 		strings.TrimSpace(bookingID),
 	)
 	var record sysbookingBookingRecord
 	var autoqueue int
 	var withFriend int
+	var friendVRCID string
 	var createdAt string
 	var updatedAt string
 	if err := row.Scan(
@@ -446,6 +479,7 @@ func (a *App) getSysbookingBookingByBookingID(bookingID string) (sysbookingBooki
 		&record.Timeslot,
 		&autoqueue,
 		&withFriend,
+		&friendVRCID,
 		&record.Status,
 		&createdAt,
 		&updatedAt,
@@ -455,6 +489,7 @@ func (a *App) getSysbookingBookingByBookingID(bookingID string) (sysbookingBooki
 	}
 	record.Autoqueue = autoqueue == 1
 	record.WithFriend = withFriend == 1
+	record.FriendVRCID = strings.TrimSpace(friendVRCID)
 	if t, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
 		record.CreatedAt = t
 	}
@@ -509,22 +544,43 @@ func (a *App) duplicateSysbookingBookingToTail(record sysbookingBookingRecord) e
 	return a.insertSysbookingBooking(clone)
 }
 
-func (a *App) updateSysbookingBookingAutoqueue(bookingID string, autoqueue bool) error {
+func (a *App) updateSysbookingBookingFields(bookingID string, autoqueue *bool, withFriend *bool, friendVRCID *string) error {
+	if autoqueue == nil && withFriend == nil && friendVRCID == nil {
+		return errors.New("missing update fields")
+	}
 	start := time.Now()
+	sets := make([]string, 0, 3)
+	args := make([]interface{}, 0, 4)
+	if autoqueue != nil {
+		sets = append(sets, "autoqueue = ?")
+		args = append(args, boolToInt(*autoqueue))
+	}
+	if withFriend != nil {
+		sets = append(sets, "with_friend = ?")
+		args = append(args, boolToInt(*withFriend))
+	}
+	if friendVRCID != nil {
+		sets = append(sets, "friend_vrcid = ?")
+		args = append(args, strings.TrimSpace(*friendVRCID))
+	}
+	sets = append(sets, "updated_at = ?")
+	args = append(args, time.Now().UTC().Format(time.RFC3339Nano))
+	args = append(args, strings.TrimSpace(bookingID), sysbookingBookingStatusWaiting)
+
 	_, err := a.db.Exec(
-		`UPDATE sysbooking_bookings
-		 SET autoqueue = ?, updated_at = ?
+		fmt.Sprintf(
+			`UPDATE sysbooking_bookings
+		 SET %s
 		 WHERE booking_id = ? AND status = ?`,
-		boolToInt(autoqueue),
-		time.Now().UTC().Format(time.RFC3339Nano),
-		strings.TrimSpace(bookingID),
-		sysbookingBookingStatusWaiting,
+			strings.Join(sets, ", "),
+		),
+		args...,
 	)
 	if err != nil {
-		log.Printf("[db] update sysbooking_bookings autoqueue booking_id=%s err=%v", bookingID, err)
+		log.Printf("[db] update sysbooking_bookings booking_id=%s err=%v", bookingID, err)
 		return err
 	}
-	log.Printf("[db] update sysbooking_bookings autoqueue booking_id=%s autoqueue=%t dur=%s", bookingID, autoqueue, time.Since(start))
+	log.Printf("[db] update sysbooking_bookings booking_id=%s autoqueue_set=%t with_friend_set=%t friend_vrcid_set=%t dur=%s", bookingID, autoqueue != nil, withFriend != nil, friendVRCID != nil, time.Since(start))
 	return nil
 }
 
@@ -583,10 +639,11 @@ func (a *App) getSysbookingQueueRankForBooking(maidID string, timeslot int, crea
 func (a *App) listSysbookingQueueItems(userID string) ([]sysbookingQueueListItem, error) {
 	start := time.Now()
 	rows, err := a.db.Query(
-		`SELECT id, booking_id, maid_id, timeslot, autoqueue, created_at
-		 FROM sysbooking_bookings
-		 WHERE user_id = ? AND status = ?
-		 ORDER BY maid_id ASC, timeslot ASC, created_at ASC, id ASC`,
+		`SELECT b.id, b.booking_id, b.maid_id,
+		        b.with_friend, b.friend_vrcid, b.timeslot, b.autoqueue, b.created_at
+		 FROM sysbooking_bookings b
+		 WHERE b.user_id = ? AND b.status = ?
+		 ORDER BY b.maid_id ASC, b.timeslot ASC, b.created_at ASC, b.id ASC`,
 		strings.TrimSpace(userID),
 		sysbookingBookingStatusWaiting,
 	)
@@ -597,18 +654,20 @@ func (a *App) listSysbookingQueueItems(userID string) ([]sysbookingQueueListItem
 	defer rows.Close()
 
 	type queueRow struct {
-		internalID int64
-		bookingID  string
-		maidID     string
-		timeslot   int
-		autoqueue  int
-		createdAt  string
+		internalID  int64
+		bookingID   string
+		maidID      string
+		withFriend  int
+		friendVRCID string
+		timeslot    int
+		autoqueue   int
+		createdAt   string
 	}
 
 	rawRows := make([]queueRow, 0)
 	for rows.Next() {
 		var item queueRow
-		if err := rows.Scan(&item.internalID, &item.bookingID, &item.maidID, &item.timeslot, &item.autoqueue, &item.createdAt); err != nil {
+		if err := rows.Scan(&item.internalID, &item.bookingID, &item.maidID, &item.withFriend, &item.friendVRCID, &item.timeslot, &item.autoqueue, &item.createdAt); err != nil {
 			log.Printf("[db] list sysbooking queue items user_id=%s scan err=%v", userID, err)
 			return nil, err
 		}
@@ -629,11 +688,13 @@ func (a *App) listSysbookingQueueItems(userID string) ([]sysbookingQueueListItem
 			continue
 		}
 		items = append(items, sysbookingQueueListItem{
-			BookingID: row.bookingID,
-			MaidID:    row.maidID,
-			Timeslot:  row.timeslot,
-			Queue:     rank,
-			Autoqueue: row.autoqueue == 1,
+			BookingID:   row.bookingID,
+			MaidID:      row.maidID,
+			WithFriend:  row.withFriend == 1,
+			FriendVRCID: row.friendVRCID,
+			Timeslot:    row.timeslot,
+			Queue:       rank,
+			Autoqueue:   row.autoqueue == 1,
 		})
 	}
 	log.Printf("[db] list sysbooking queue items user_id=%s count=%d dur=%s", userID, len(items), time.Since(start))
