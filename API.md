@@ -65,6 +65,15 @@
 - `sukiApp-version` 只校验主版本号，要求主版本号大于 `1`
 - 会忽略 `-rc.1`、`-beta` 等后缀
 
+#### CORS 预检允许头
+
+- `Content-Type`
+- `User-Agent`
+- `sukiApp-version`
+- `Accept`
+- `Range`
+- `Origin`
+
 #### 支持范围
 
 - 只接受 `https://...` 远程地址

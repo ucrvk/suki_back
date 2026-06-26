@@ -199,7 +199,7 @@ func reversePicCORSMiddleware() gin.HandlerFunc {
 			h := c.Writer.Header()
 			h.Set("Access-Control-Allow-Origin", origin)
 			h.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-			h.Set("Access-Control-Allow-Headers", "Content-Type, User-Agent, Accept, Range, Origin")
+			h.Set("Access-Control-Allow-Headers", "Content-Type, User-Agent, sukiApp-version, Accept, Range, Origin")
 			h.Set("Access-Control-Expose-Headers", "Content-Length, Content-Type")
 			h.Set("Vary", "Origin")
 			if c.Request.Method == http.MethodOptions {
