@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"firebase.google.com/go/v4"
+	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/messaging"
 	"github.com/disintegration/imaging"
 	"github.com/gen2brain/avif"
@@ -66,11 +66,12 @@ type Config struct {
 }
 
 type App struct {
-	cfg         Config
-	db          *sql.DB
-	supabase    *supabase.Client
-	fcmClient   *messaging.Client
-	imageClient *http.Client
+	cfg             Config
+	db              *sql.DB
+	supabase        *supabase.Client
+	fcmClient       *messaging.Client
+	imageClient     *http.Client
+	reversePicCache *reversePicCache
 }
 
 type BookingRow struct {
@@ -170,12 +171,19 @@ func NewApp(cfg Config) (*App, error) {
 		return nil, err
 	}
 
+	reversePicCache, err := newReversePicCache(DefaultReversePicCacheDir)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
 	return &App{
-		cfg:         cfg,
-		db:          db,
-		supabase:    supa,
-		fcmClient:   fcmClient,
-		imageClient: &http.Client{Timeout: imageDownloadTimeout},
+		cfg:             cfg,
+		db:              db,
+		supabase:        supa,
+		fcmClient:       fcmClient,
+		imageClient:     &http.Client{Timeout: imageDownloadTimeout},
+		reversePicCache: reversePicCache,
 	}, nil
 }
 

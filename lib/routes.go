@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,13 +19,7 @@ func (a *App) runServer() error {
 	r := gin.New()
 	r.Use(requestLogMiddleware())
 	r.Use(gin.Recovery())
-	r.Use(cors.New(cors.Config{
-		AllowAllOrigins: true,
-		AllowMethods:    []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
-		AllowHeaders:    []string{"*"},
-		ExposeHeaders:   []string{"*"},
-		MaxAge:          24 * time.Hour,
-	}))
+	r.Use(reversePicCORSMiddleware())
 
 	var router gin.IRoutes = r
 	if routePrefix != "" {
@@ -43,6 +36,7 @@ func (a *App) runServer() error {
 	router.GET("/sysbooking/queuelist", a.handleSysbookingQueueList)
 	router.GET("/manifest.json", a.serveManifest)
 	router.GET("/images/:file", a.serveImage)
+	router.GET("/reverse-pic/*target", a.handleReversePic)
 	router.POST("/subscription", a.handleSubscriptionAdd)
 	router.DELETE("/subscription", a.handleSubscriptionRemove)
 

@@ -5,7 +5,7 @@
 ## 通用约定
 
 - 所有接口默认返回 JSON，图片接口除外。
-- CORS 为宽松策略。
+- 非 `reverse-pic` 路由保持宽松 CORS；`/reverse-pic/*target` 仅允许指定来源。
 - 默认监听地址为 `:6988`。
 - 如果监听地址带路径前缀，例如 `:6988/api`，则所有路由会挂载到该前缀下。
 
@@ -48,6 +48,50 @@
 - `200 OK`
 - `400 Bad Request`
 - `404 Not Found`
+
+---
+
+### `GET /reverse-pic/*target`
+
+将远程图片下载、按比例缩放并转换为 AVIF 后返回，同时使用磁盘缓存复用结果。
+
+#### 路径参数
+
+- `target`：完整的 `https://...` 远程图片地址
+- 目标地址通过 wildcard 接收，建议在包含 `?`、`#` 等字符时进行 URL 编码
+
+#### 请求头
+
+- `sukiApp-version` 只校验主版本号，要求主版本号大于 `1`
+- 会忽略 `-rc.1`、`-beta` 等后缀
+
+#### 支持范围
+
+- 只接受 `https://...` 远程地址
+- 远端响应 `Content-Type` 仅允许 `image/png`、`image/jpeg`、`image/jpg`、`image/webp`
+- 若图片较长边大于 `1000px`，则按比例缩放到长边 `1000px`
+- 若长宽都不超过 `1000px`，则保持原尺寸
+- 输出统一为 AVIF
+- 缓存键按归一化后的目标 URL 生成，磁盘最多保留 `1000` 张
+
+#### 响应头
+
+- `Content-Type: image/avif`
+- `Cache-Control: public, max-age=31536000, immutable`
+- CORS 仅放行以下来源：
+  - `https://suki.wenwen12305.top`
+  - `http://localhost`
+  - `http://127.0.0.1`
+  - `http://::1`
+
+#### 状态码
+
+- `200 OK`
+- `400 Bad Request`
+- `403 Forbidden`
+- `415 Unsupported Media Type`
+- `502 Bad Gateway`
+- `500 Internal Server Error`
 
 ---
 
