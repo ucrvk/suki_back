@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func (a *App) runAutoReservations() error {
+func (a *App) runAutoReservations(timeSlots []string) error {
 	start := time.Now()
 	log.Printf("[auto_reservation] start")
 	rows, err := a.fetchBookingRows()
@@ -23,9 +23,8 @@ func (a *App) runAutoReservations() error {
 		return nil
 	}
 
-	row := rows[0]
 	slotLabels := map[int]string{}
-	for _, raw := range row.TimeSlots {
+	for _, raw := range timeSlots {
 		slot, label, ok := normalizeReservationTimeSlot(raw)
 		if !ok {
 			continue
@@ -39,7 +38,7 @@ func (a *App) runAutoReservations() error {
 		return nil
 	}
 
-	for _, maid := range row.Maids {
+	for _, maid := range rows[0].Maids {
 		if maid.Disabled {
 			continue
 		}
@@ -100,9 +99,19 @@ func (a *App) attemptAutoReservation(maid Maid, timeSlotLabel string, booking sy
 		log.Printf("[auto_reservation] no fcm token user_id=%s", booking.UserID)
 	}
 
-	client, session, err := a.newSupabaseAuthClient(sessionRecord.SBRefreshToken)
+	client, session, valid, err := a.authenticatedSupabaseClient(sessionRecord)
 	if err != nil {
-		log.Printf("[auto_reservation] supabase refresh failed user_id=%s err=%v", booking.UserID, err)
+		log.Printf("[auto_reservation] supabase token check failed user_id=%s err=%v", booking.UserID, err)
+		if err := a.setSysbookingSessionTokenValidByToken(sessionRecord.Token, false); err != nil {
+			return err
+		}
+		if sendErr := a.notifyBookingTokenInvalid(sessionRecord, maid, timeSlotLabel); sendErr != nil {
+			log.Printf("notify token invalid failed: user_id=%s err=%v", sessionRecord.UserID, sendErr)
+		}
+		return nil
+	}
+	if !valid {
+		log.Printf("[auto_reservation] supabase token invalid after refresh user_id=%s", booking.UserID)
 		if err := a.setSysbookingSessionTokenValidByToken(sessionRecord.Token, false); err != nil {
 			return err
 		}

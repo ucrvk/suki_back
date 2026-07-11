@@ -5,7 +5,7 @@
 ## 通用约定
 
 - 所有接口默认返回 JSON，图片接口除外。
-- CORS 为宽松策略。
+- 除 `/pic-proxy/*target` 外，CORS 为宽松策略。
 - 默认监听地址为 `:6988`。
 - 如果监听地址带路径前缀，例如 `:6988/api`，则所有路由会挂载到该前缀下。
 
@@ -48,6 +48,49 @@
 - `200 OK`
 - `400 Bad Request`
 - `404 Not Found`
+
+---
+
+### `GET /pic-proxy/*target`
+
+拉取远程图片，按最长边最多 `900px` 等比缩放并转为 AVIF 后返回，同时写入本地磁盘缓存。
+
+#### 路径参数
+
+- `target`：完整的 `https://...` 远程图片地址
+- 目标地址通过 wildcard 接收，包含特殊字符时建议 URL 编码
+
+#### 支持范围
+
+- 只接受 `https://...` 远程地址
+- 远端响应 `Content-Type` 仅允许：
+  - `image/png`
+  - `image/jpeg`
+  - `image/jpg`
+  - `image/webp`
+  - `application/octet-stream`，且 URL 路径必须以 `.jpg`、`.png`、`.webp` 结尾
+- 若原图最长边大于 `900px`，则按比例缩放到最长边 `900px`
+- 若原图最长边不超过 `900px`，则保持原尺寸
+- 输出统一为 AVIF
+- 缓存键按归一化后的目标 URL 生成
+- 磁盘缓存最多保留 `1000` 张，按 LRU 删除旧文件
+
+#### 响应头
+
+- `Content-Type: image/avif`
+- `Cache-Control: public, max-age=31536000, immutable`
+- CORS 仅允许以下来源：
+  - `https://suki.wenwen12305.top`
+  - `http://localhost:*`
+  - `http://127.0.0.1:*`
+
+#### 状态码
+
+- `200 OK`
+- `400 Bad Request`
+- `415 Unsupported Media Type`
+- `500 Internal Server Error`
+- `502 Bad Gateway`
 
 ---
 
