@@ -314,7 +314,7 @@ func (a *App) handleSysbookingTokenValid(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	valid, err := a.isSupabaseAccessTokenValid(session.SBToken)
+	_, _, valid, err := a.authenticatedSupabaseClient(session)
 	if err != nil {
 		log.Printf("[sysbooking.tokenvalid] supabase token check failed user_id=%s token=%s err=%v", session.UserID, shortLogValue(session.Token, 12), err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

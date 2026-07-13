@@ -1,9 +1,7 @@
 package lib
 
 import (
-	"fmt"
 	"log"
-	"strings"
 	"time"
 )
 
@@ -109,21 +107,9 @@ func (a *App) listLatestValidSysbookingSessions() ([]sysbookingSessionRecord, er
 
 func (a *App) refreshSysbookingSession(session sysbookingSessionRecord) error {
 	start := time.Now()
-	refreshToken := strings.TrimSpace(session.SBRefreshToken)
-	if refreshToken == "" {
-		log.Printf("[poll.refresh] missing refresh token user_id=%s", session.UserID)
-		if err := a.setSysbookingSessionTokenValidByToken(session.Token, false); err != nil {
-			return err
-		}
-		if err := a.notifySysbookingSessionRefreshInvalid(session, "missing refresh token"); err != nil {
-			log.Printf("notify refresh invalid failed: user_id=%s err=%v", session.UserID, err)
-		}
-		return nil
-	}
-
-	_, refreshed, err := a.newSupabaseAuthClient(refreshToken)
+	_, _, valid, err := a.authenticatedSupabaseClient(session)
 	if err != nil {
-		log.Printf("[poll.refresh] refresh failed user_id=%s err=%v", session.UserID, err)
+		log.Printf("[poll.refresh] token check failed user_id=%s err=%v", session.UserID, err)
 		if err := a.setSysbookingSessionTokenValidByToken(session.Token, false); err != nil {
 			return err
 		}
@@ -132,26 +118,16 @@ func (a *App) refreshSysbookingSession(session sysbookingSessionRecord) error {
 		}
 		return nil
 	}
-	if refreshed.User.ID != "" && refreshed.User.ID != session.UserID {
-		log.Printf("[poll.refresh] user mismatch user_id=%s refreshed=%s", session.UserID, refreshed.User.ID)
+	if !valid {
+		log.Printf("[poll.refresh] token invalid after refresh user_id=%s", session.UserID)
 		if err := a.setSysbookingSessionTokenValidByToken(session.Token, false); err != nil {
 			return err
 		}
-		if err := a.notifySysbookingSessionRefreshInvalid(session, fmt.Sprintf("user id mismatch: %s", refreshed.User.ID)); err != nil {
+		if err := a.notifySysbookingSessionRefreshInvalid(session, "access token remains invalid after refresh"); err != nil {
 			log.Printf("notify refresh invalid failed: user_id=%s err=%v", session.UserID, err)
 		}
 		return nil
 	}
-
-	updated := session
-	updated.SBRefreshToken = firstNonEmpty(strings.TrimSpace(refreshed.RefreshToken), refreshToken)
-	updated.SBToken = strings.TrimSpace(refreshed.AccessToken)
-	updated.TokenValid = true
-	updated.UpdatedAt = time.Now().UTC()
-	if err := a.upsertSysbookingSession(updated); err != nil {
-		log.Printf("[poll.refresh] store updated session failed user_id=%s err=%v", session.UserID, err)
-		return err
-	}
-	log.Printf("[poll.refresh] ok user_id=%s dur=%s", session.UserID, time.Since(start))
+	log.Printf("[poll.refresh] access token valid user_id=%s dur=%s", session.UserID, time.Since(start))
 	return nil
 }

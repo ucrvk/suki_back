@@ -66,11 +66,13 @@ type Config struct {
 }
 
 type App struct {
-	cfg             Config
-	db              *sql.DB
-	supabase        *supabase.Client
-	fcmClient       *messaging.Client
-	imageClient     *http.Client
+	cfg                        Config
+	db                         *sql.DB
+	supabase                   *supabase.Client
+	fcmClient                  *messaging.Client
+	imageClient                *http.Client
+	picProxyCache          *picProxyCache
+	bookingPollInitialized bool
 	reversePicCache *reversePicCache
 }
 
@@ -171,6 +173,12 @@ func NewApp(cfg Config) (*App, error) {
 		return nil, err
 	}
 
+	picProxyCache, err := newPicProxyCache(DefaultPicProxyCacheDir)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
 	reversePicCache, err := newReversePicCache(DefaultReversePicCacheDir)
 	if err != nil {
 		_ = db.Close()
@@ -178,11 +186,12 @@ func NewApp(cfg Config) (*App, error) {
 	}
 
 	return &App{
-		cfg:             cfg,
-		db:              db,
-		supabase:        supa,
-		fcmClient:       fcmClient,
-		imageClient:     &http.Client{Timeout: imageDownloadTimeout},
+		cfg:               cfg,
+		db:                db,
+		supabase:          supa,
+		fcmClient:         fcmClient,
+		imageClient:       &http.Client{Timeout: imageDownloadTimeout},
+		picProxyCache: picProxyCache,
 		reversePicCache: reversePicCache,
 	}, nil
 }
@@ -294,7 +303,7 @@ func (a *App) SyncMaidImages() error {
 
 func (a *App) fetchBookingRows() ([]BookingRow, error) {
 	var rows []BookingRow
-	_, err := a.supabase.From(supabaseTableName).Select("*", "", false).Limit(1, "").ExecuteTo(&rows)
+	_, err := a.supabase.From(supabaseTableName).Select("maids", "", false).Limit(1, "").ExecuteTo(&rows)
 	if err != nil {
 		return nil, err
 	}
@@ -587,27 +596,39 @@ func (a *App) upsertMaidRecord(record MaidRecord) error {
 }
 
 func (a *App) setAppBool(key string, value bool) error {
+	return a.setAppString(key, boolToString(value))
+}
+
+func (a *App) setAppString(key, value string) error {
 	_, err := a.db.Exec(
 		`INSERT INTO app_state (key, value, updated_at)
 		 VALUES (?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
 		key,
-		boolToString(value),
+		value,
 		time.Now().UTC().Format(time.RFC3339Nano),
 	)
 	return err
 }
 
 func (a *App) getAppBool(key string) (bool, bool, error) {
+	value, ok, err := a.getAppString(key)
+	if err != nil || !ok {
+		return false, ok, err
+	}
+	return value == "1", true, nil
+}
+
+func (a *App) getAppString(key string) (string, bool, error) {
 	row := a.db.QueryRow(`SELECT value FROM app_state WHERE key = ?`, key)
 	var value string
 	if err := row.Scan(&value); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return false, false, nil
+			return "", false, nil
 		}
-		return false, false, err
+		return "", false, err
 	}
-	return value == "1", true, nil
+	return value, true, nil
 }
 
 func boolToString(v bool) string {

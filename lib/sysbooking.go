@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/supabase-community/gotrue-go/types"
 	"github.com/supabase-community/supabase-go"
 )
 
@@ -218,6 +219,92 @@ func (a *App) isSupabaseAccessTokenValid(accessToken string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// authenticatedSupabaseClient reuses a valid access token and refreshes it only
+// after validation fails. A refreshed session is persisted after it passes a
+// second validation check.
+func (a *App) authenticatedSupabaseClient(record sysbookingSessionRecord) (*supabase.Client, supabaseRefreshSession, bool, error) {
+	valid, err := a.isSupabaseAccessTokenValid(record.SBToken)
+	if err != nil {
+		return nil, supabaseRefreshSession{}, false, err
+	}
+	if valid {
+		client, err := a.newSupabaseAccessTokenClient(record.SBToken)
+		if err != nil {
+			return nil, supabaseRefreshSession{}, false, err
+		}
+		user, err := client.Auth.GetUser()
+		if err != nil {
+			return nil, supabaseRefreshSession{}, false, err
+		}
+		return client, supabaseRefreshSessionFromUser(record.SBToken, record.SBRefreshToken, user.User), true, nil
+	}
+
+	refreshToken := strings.TrimSpace(record.SBRefreshToken)
+	if refreshToken == "" {
+		return nil, supabaseRefreshSession{}, false, nil
+	}
+	client, refreshed, err := a.newSupabaseAuthClient(refreshToken)
+	if err != nil {
+		return nil, supabaseRefreshSession{}, false, err
+	}
+	valid, err = a.isSupabaseAccessTokenValid(refreshed.AccessToken)
+	if err != nil {
+		return nil, supabaseRefreshSession{}, false, err
+	}
+	if !valid {
+		return nil, supabaseRefreshSession{}, false, nil
+	}
+	if refreshed.User.ID != "" && refreshed.User.ID != record.UserID {
+		return nil, supabaseRefreshSession{}, false, fmt.Errorf("user id mismatch: %s", refreshed.User.ID)
+	}
+
+	updated := record
+	updated.SBRefreshToken = firstNonEmpty(strings.TrimSpace(refreshed.RefreshToken), refreshToken)
+	updated.SBToken = strings.TrimSpace(refreshed.AccessToken)
+	updated.TokenValid = true
+	updated.UpdatedAt = time.Now().UTC()
+	if err := a.upsertSysbookingSession(updated); err != nil {
+		return nil, supabaseRefreshSession{}, false, err
+	}
+	return client, refreshed, true, nil
+}
+
+func (a *App) newSupabaseAccessTokenClient(accessToken string) (*supabase.Client, error) {
+	client, err := supabase.NewClient(a.cfg.SupabaseURL, a.cfg.SupabaseKey, &supabase.ClientOptions{
+		Schema: "public",
+		Headers: map[string]string{
+			"User-Agent": supabaseUserAgent,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	client.UpdateAuthSession(types.Session{AccessToken: strings.TrimSpace(accessToken)})
+	return client, nil
+}
+
+func supabaseRefreshSessionFromUser(accessToken, refreshToken string, user types.User) supabaseRefreshSession {
+	return supabaseRefreshSession{
+		AccessToken:  strings.TrimSpace(accessToken),
+		RefreshToken: strings.TrimSpace(refreshToken),
+		User: struct {
+			ID           string                 `json:"id"`
+			Aud          string                 `json:"aud"`
+			Role         string                 `json:"role"`
+			Email        string                 `json:"email"`
+			AppMetadata  map[string]interface{} `json:"app_metadata"`
+			UserMetadata map[string]interface{} `json:"user_metadata"`
+		}{
+			ID:           user.ID.String(),
+			Aud:          user.Aud,
+			Role:         user.Role,
+			Email:        user.Email,
+			AppMetadata:  user.AppMetadata,
+			UserMetadata: user.UserMetadata,
+		},
+	}
 }
 
 func isSupabaseAccessTokenUnauthorized(err error) bool {

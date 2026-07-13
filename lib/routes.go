@@ -19,7 +19,7 @@ func (a *App) runServer() error {
 	r := gin.New()
 	r.Use(requestLogMiddleware())
 	r.Use(gin.Recovery())
-	r.Use(reversePicCORSMiddleware())
+	r.Use(appCORSMiddleware())
 
 	var router gin.IRoutes = r
 	if routePrefix != "" {
@@ -36,6 +36,7 @@ func (a *App) runServer() error {
 	router.GET("/sysbooking/queuelist", a.handleSysbookingQueueList)
 	router.GET("/manifest.json", a.serveManifest)
 	router.GET("/images/:file", a.serveImage)
+	router.GET("/pic-proxy/*target", a.handlePicProxy)
 	router.GET("/reverse-pic/*target", a.handleReversePic)
 	router.POST("/subscription", a.handleSubscriptionAdd)
 	router.DELETE("/subscription", a.handleSubscriptionRemove)
