@@ -66,14 +66,14 @@ type Config struct {
 }
 
 type App struct {
-	cfg                        Config
-	db                         *sql.DB
-	supabase                   *supabase.Client
-	fcmClient                  *messaging.Client
-	imageClient                *http.Client
+	cfg                    Config
+	db                     *sql.DB
+	supabase               *supabase.Client
+	fcmClient              *messaging.Client
+	imageClient            *http.Client
 	picProxyCache          *picProxyCache
 	bookingPollInitialized bool
-	reversePicCache *reversePicCache
+	reversePicCache        *reversePicCache
 }
 
 type BookingRow struct {
@@ -186,12 +186,12 @@ func NewApp(cfg Config) (*App, error) {
 	}
 
 	return &App{
-		cfg:               cfg,
-		db:                db,
-		supabase:          supa,
-		fcmClient:         fcmClient,
-		imageClient:       &http.Client{Timeout: imageDownloadTimeout},
-		picProxyCache: picProxyCache,
+		cfg:             cfg,
+		db:              db,
+		supabase:        supa,
+		fcmClient:       fcmClient,
+		imageClient:     &http.Client{Timeout: imageDownloadTimeout},
+		picProxyCache:   picProxyCache,
 		reversePicCache: reversePicCache,
 	}, nil
 }
@@ -205,8 +205,46 @@ func (a *App) Close() error {
 
 func (a *App) Run() error {
 	go a.startBookingPoller()
+	go a.startDailyImageSyncPoller()
 	go a.startDailyRefreshTokenPoller()
 	return a.runServer()
+}
+
+const dailyImageSyncHourUTC8 = 0
+
+func (a *App) startDailyImageSyncPoller() {
+	for {
+		wait := TimeUntilNextDailyImageSync(time.Now())
+		log.Printf("[poll.image] next run in %s", wait)
+
+		timer := time.NewTimer(wait)
+		<-timer.C
+
+		log.Printf("[poll.image] tick start")
+		if err := a.SyncMaidImages(); err != nil {
+			log.Printf("[poll.image] sync failed: %v", err)
+		} else {
+			log.Printf("[poll.image] tick ok")
+		}
+	}
+}
+
+func TimeUntilNextDailyImageSync(now time.Time) time.Duration {
+	localNow := now.In(utcPlus8)
+	next := time.Date(
+		localNow.Year(),
+		localNow.Month(),
+		localNow.Day(),
+		dailyImageSyncHourUTC8,
+		0,
+		0,
+		0,
+		utcPlus8,
+	)
+	if !next.After(localNow) {
+		next = next.AddDate(0, 0, 1)
+	}
+	return next.Sub(now)
 }
 
 func (a *App) SyncMaidImages() error {
